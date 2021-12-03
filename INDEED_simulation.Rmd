@@ -1,0 +1,550 @@
+---
+title: "New Indeed"
+author: "Yein Jeon"
+date: '2021 10 15 '
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# install.packages("devtools")
+# library(devtools)
+# devtools::install_github("ressomlab/INDEED")
+library(INDEED)
+library(mvtnorm)
+library(caret)
+# devtools::install_github('tgrimes/SeqNet')
+library(SeqNet)
+```
+
+#Build blank boxplots
+#Just run one time before data simulation
+```{r}
+# Blank boxplots for Indeed after corrections
+fpr.all_adj=c()
+fnr.all_adj=c()
+precision.all_adj=c()
+recall.all_adj=c()
+f.measure.all_adj=c()
+```
+
+```{r}
+# Blank boxplots for Original Indeed
+fpr.all=c()
+fnr.all=c()
+precision.all=c()
+recall.all=c()
+f.measure.all=c()
+```
+
+#Original Indeed From Testing Script
+```{r}
+set.seed(0)
+n <- 100 # Sample size (per network)
+p <- 10  # Number of genes in the network.
+
+# Create a precision matrix. 
+# The network contains one hub gene (the 5th node).
+
+################################################################
+#####Adding Random Nodes for True Differential Network##########
+# create random nodes
+simdata=rnbinom(p,p/2,prob=0.5)
+simdata=(simdata-mean(simdata))/max(simdata)
+dat=rep(0,p*(p-1)/2)
+sample.dat=sample(1:(p*(p-1)/2),size=p,replace=F)
+dat[sample.dat]=simdata
+# assign random nodes to precision matrix
+pcor_matrix <- diag(1, p)
+pcor_matrix[upper.tri(pcor_matrix, diag=FALSE)]=dat
+pcor_matrix=pcor_matrix+t(pcor_matrix)
+diag(pcor_matrix) <- rep(1, p)
+
+# create hub node at middle node
+hub_node <- p/2
+pcor_matrix[hub_node, c(1:(hub_node-1),(hub_node+1):p)] <- rbinom(p - 1, 1, 0.5) * (-1)^rbinom(p - 1, 1, 0.5) *
+  runif(p - 1, 0.5, 1)
+pcor_matrix[c(1:(hub_node-1),(hub_node+1):p),hub_node] <- pcor_matrix[hub_node, c(1:(hub_node-1),(hub_node+1):p)]
+
+# add hub nodes
+# pcor_matrix[60, c(1:59,61:p)] <- rbinom(p - 1, 1, 0.5) * (-1)^rbinom(p - 1, 1, 0.5) *
+#   runif(p - 1, 0.5, 1)
+# pcor_matrix[c(1:59,61:p),60] <- pcor_matrix[60, c(1:59,61:p)]
+
+# pcor_matrix[30, c(1:29,31:59,61:p)] <- rbinom(p - 2, 1, 0.1) * (-1)^rbinom(p - 2, 1, 0.5) *
+#   runif(p - 2, 0.5, 1)
+# pcor_matrix[c(1:29,31:59,61:p),30] <- pcor_matrix[30, c(1:29,31:59,61:p)]
+# 
+# pcor_matrix[90, c(1:29,31:59,61:89,91:p)] <- rbinom(p - 3, 1, 0.05) * (-1)^rbinom(p - 3, 1, 0.5) *
+#   runif(p - 3, 0.5, 1)
+# pcor_matrix[c(1:29,31:59,61:89,91:p),90] <- pcor_matrix[90, c(1:29,31:59,61:89,91:p)]
+
+# Adjust the diagonal to obtain a valid precision matrix.
+min_eigen <-  min(eigen(pcor_matrix)$val)
+
+if(min_eigen < 0) {#keep it to be zero if it is originally zero
+  pcor_matrix <- pcor_matrix + diag(1, p) * (abs(min_eigen) + 0.1)
+  pcor_matrix <- cov2cor(pcor_matrix)
+}
+
+# Obtain the covariance matrix.
+sigma <- solve(pcor_matrix)
+# Sample observations from the network containing a hub gene.
+x1 <- mvtnorm::rmvnorm(n, rep(0, p), sigma) 
+# Sample observations from a network containing no connections.
+x2 <- matrix(rnorm(n * p), nrow = n, ncol = p)
+
+# Combine both samples into one data.frame with rows corresponding to genes
+# and columns corresponding to observations.
+df_expr <- as.data.frame(t(rbind(x1, x2)))
+rownames(df_expr) <- 1:p # Generic names for genes.
+id <- matrix(1:p, ncol = 1) # Argument for select_rho_partial().
+x <- matrix(rep(c(0, 1), each = n), nrow = 1) # Indicate observation membership.
+x <- as.data.frame(x) # Argument for select_rho_partial()
+
+# Run INDEED (note, performance doesn't change if permutation is increased)
+res <- select_rho_partial(df_expr, x, id = id, error_curve = TRUE)
+res2 <- partial_cor(data_list = res, rho_group1 = 'min', rho_group2 = "min",
+                    permutation = 1000, permutation_thres = 0.05, fdr = F)
+
+# Take 'diff_network' element from res2 and store as data.frame.
+res3 <- as.data.frame(res2$diff_network) # "Activity score" is ignored.
+
+# Construct the DC network
+dnw_INDEED <- matrix(0, p, p)
+if(nrow(res3) > 0) {
+  # Index Node1 and Node2 in dnw_INDEED and update with Weight.
+  dnw_INDEED[cbind(res3[, 1], res3[, 2])] <- abs(res3[, 4])
+}
+# Symmetrize.
+dnw_INDEED <- dnw_INDEED + t(dnw_INDEED)
+
+# Run INDEED (note, performance doesn't change if permutation is increased)
+res2 <- partial_cor(data_list = res, rho_group1 = 'min', rho_group2 = "min",
+                    permutation = 1000, permutation_thres = 0.05, fdr = T)
+
+# Take 'diff_network' element from res2 and store as data.frame.
+res4 <- as.data.frame(res2$diff_network) # "Activity score" is ignored.
+
+# Construct the DC network
+dnw_INDEED_new <- matrix(0, p, p)
+if(nrow(res4) > 0) {
+  # Index Node1 and Node2 in dnw_INDEED and update with Weight.
+  dnw_INDEED_new[cbind(res4[, 1], res4[, 2])] <- abs(res4[, 4])
+}
+# Symmetrize.
+dnw_INDEED_new <- dnw_INDEED_new + t(dnw_INDEED_new)
+
+# Heatmap of the true differential network.
+heatmap(abs(pcor_matrix - diag(p)), 
+        main = "True Diff. Network",
+        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
+        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+# # Heatmap of DC network estimated directly by inverting the estimated covariance
+# # matrix. This is to demonstrate that the observations were simulated correctly.
+# pre_matrix_1 <- solve(cov(x1))
+# pre_matrix_2 <- solve(cov(x2))
+# 
+# pcor_matrix_1 <- diag(1, p)
+# for (i in 1:(p-1)){
+#  for (j in (i+1):p){
+#    pcor_matrix_1[i,j] <- -pre_matrix_1[i,j]/sqrt(pre_matrix_1[i,i] * pre_matrix_1[j,j])
+#    pcor_matrix_1[j,i] <- pcor_matrix_1[i,j]
+#  }
+# }
+# 
+# pcor_matrix_2 <- diag(1, p)
+# for (i in 1:(p-1)){
+#  for (j in (i+1):p){
+#    pcor_matrix_2[i,j] <- -pre_matrix_2[i,j]/sqrt(pre_matrix_2[i,i] * pre_matrix_2[j,j])
+#    pcor_matrix_2[j,i] <- pcor_matrix_2[i,j]
+#  }
+# }
+# 
+# heatmap(abs(pcor_matrix_1 - pcor_matrix_2),
+#        main = "Inverse Covariance",
+#        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
+#        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+# Heatmap of estiamted DC network with Indeed_no_fdr.
+heatmap(abs(dnw_INDEED), 
+        main = "Indeed_no_fdr",
+        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
+        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+# Heatmap of estiamted DC network with Indeed_fdr.
+heatmap(abs(dnw_INDEED_new), 
+        main = "Indeed_fdr",
+        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
+        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+
+######################################
+#####Adding Confusion Matrix##########
+#Transfer Precision Matrix to Data Frame to express the connections between each pair of nodes
+pcor.origin2=pcor_matrix-diag(p)
+pcor.origin=vector()
+
+for (i in 1:(p-1)){
+  for (j in (i+1):p){
+    pcor.origin1=c(i,j,pcor.origin2[i,j])
+    pcor.origin=append(pcor.origin,pcor.origin1)
+  }
+}
+
+pcor.origin=matrix(pcor.origin,ncol=3,byrow=T)
+pcor.origin=data.frame(pcor.origin)
+names(pcor.origin)=c("Node1","Node2","precision")
+
+# indeed with no fdr
+together_intersect1=merge(pcor.origin, res3, by=c("Node1","Node2"),all=T)
+together_intersect1[is.na(together_intersect1)] <- 0
+label_true <- rep(0, p*(p-1)/2)
+label_true[which(together_intersect1$precision != 0)] = 1
+label_indeed_no_fdr <- rep(0, p*(p-1)/2)
+label_indeed_no_fdr[which(together_intersect1$Binary != 0)] = 1
+metrics_indeed_no_fdr <- confusionMatrix(factor(label_indeed_no_fdr, levels = c('1', '0')), 
+                                         factor(label_true, levels = c('1', '0')))
+metrics_indeed_no_fdr 
+
+# indeed with fdr
+together_intersect2=merge(pcor.origin, res4, by=c("Node1","Node2"),all=T)
+together_intersect2[is.na(together_intersect2)] <- 0
+label_indeed_fdr <- rep(0, p*(p-1)/2)
+label_indeed_fdr[which(together_intersect2$Binary != 0)] = 1
+metrics_indeed_fdr <- confusionMatrix(factor(label_indeed_fdr, levels = c('1', '0')), 
+                                      factor(label_true, levels = c('1', '0')))
+metrics_indeed_fdr
+
+##############################
+#####Adding PR curve##########
+# install.packages("PRROC")
+library(PRROC)
+# pr curve for INDEED without fdr
+pr <- pr.curve(abs(together_intersect1$Weight[label_true == 1]), abs(together_intersect1$Weight[label_true == 0]), curve = TRUE )
+plot(pr)
+# pr curve for INDEED with fdr
+pr <- pr.curve(abs(together_intersect2$Weight[label_true == 1]), abs(together_intersect2$Weight[label_true == 0]), curve = TRUE )
+plot(pr)
+
+```
+
+#dnapath
+```{r}
+# # install_version("dnapath", version = "0.6.9", repos = "http://cran.us.r-project.org")
+# # # install.packages("dnapath")
+# library(dnapath)
+# 
+# results <- dnapath(x = t(df_expr), groups = t(x), pathway_list = c(), n_perm = 100)
+# results
+```
+
+#JDINAC
+#Load codes
+```{r}
+library(KernSmooth)
+# install.packages("akima")
+library(akima)
+library(glmnet)
+
+denPre2D <- function(edge,classLabel,DataFit,newData,method=c("integers","bandwidth")[2]){
+  
+  Index0 <- which(classLabel==0)
+  Index1 <- which(classLabel==1)
+  x <- DataFit[c(Index0,Index1),edge[1]]
+  y <- DataFit[c(Index0,Index1),edge[2]]
+  x0 <- newData[,edge[1]]
+  y0 <- newData[,edge[2]]
+  N <- max(c(x,y))
+  coI <- 1:length(Index0)
+  caI <- length(Index0)+(1:length(Index1))
+  
+  caWidth <- c(bw.nrd0(x[caI]),bw.nrd0(y[caI]))
+  coWidth <- c(bw.nrd0(x[coI]),bw.nrd0(y[coI]))
+  gridSize <- switch(method,
+                     integers  = c(N, N),
+                     bandwidth = ceiling(N / c(min(caWidth[1], coWidth[1]), 
+                                               min(caWidth[2], coWidth[2]))))
+  gridSize <- pmax(gridSize,10) # make sure there are at least 100 points in total
+
+  caSmooth <- bkde2D(x=cbind(x[caI], y[caI]), bandwidth=caWidth,  gridsize=gridSize)
+  caP <- caSmooth$fhat
+  coSmooth <- bkde2D(x=cbind(x[coI], y[coI]), bandwidth=coWidth, gridsize=gridSize)
+  coP <- coSmooth$fhat
+
+  # make sure there are no zeros in the smooth function (since we will take a log of that)
+  # caP[caP==0] <- min(caP[caP>0])/100
+  caP <- pmax(caP, 1e-10)
+  # coP[coP==0] <- min(coP[coP>0])/100
+  coP <- pmax(coP, 1e-10)
+
+  cafit <- bicubic(x=caSmooth$x1, y=caSmooth$x2, z=caP, x0=x0,y0=y0)
+  cofit <- bicubic(x=coSmooth$x1, y=coSmooth$x2, z=coP, x0=x0,y0=y0)
+  cafit$z <- pmax(cafit$z, 1e-10)
+  cofit$z <- pmax(cofit$z, 1e-10)
+  denPre <- log(cafit$z/cofit$z)
+  denPre
+}
+
+
+
+jdinac <- function(EDGE,classLabel,DataFit,DataPre,zFit=NULL,zPre=NULL,nsplit=10,nfolds=5){
+  
+  if(missing(DataPre)) {
+    DataPre <- DataFit
+    zPre <- zFit
+  }  
+  if(!is.null(zFit) & !is.null(zPre)){
+    Pre.Z <- jdinac.z(EDGE=EDGE,classLabel=classLabel,DataFit=DataFit,DataPre=DataPre,
+                        zFit=zFit,zPre=zPre,nsplit=nsplit,nfolds=nfolds)
+    yPre <- Pre.Z$yPre
+    Eset <- Pre.Z$Eset
+  } else if(nsplit<=0){       
+    stop("nsplit must be positive integer")    
+  } else {
+    preY <- NULL
+    vset <- NULL
+    for(i in 1:nsplit){
+      size0 <- sum(classLabel==0)
+      size1 <- sum(classLabel==1)
+      sn0 <- round(size0/2)
+      sn1 <- round(size1/2)
+      splitid <- c(sample(1:size0,sn0),sample((1:size1)+size0,sn1))
+    
+      cLabel <- classLabel[splitid]        
+      denX <- apply(EDGE,1,denPre2D,classLabel=cLabel,DataFit=DataFit[splitid,],
+                    newData=rbind(DataFit[-splitid,],DataPre))
+      y <- classLabel[-splitid]
+      cv.fit <- cv.glmnet(x=denX[1:length(y),], y=y, family = "binomial", nfolds=nfolds) 
+      yp <- predict(cv.fit,newx=denX[-(1:length(y)),], s="lambda.min",type="response")
+      preY <- cbind(preY,yp) 
+      coefs <- which(coef(cv.fit,s="lambda.min")[-1] !=0)
+      vset <- c(vset,coefs)
+    
+      cLabel <- classLabel[-splitid]        
+      denX <- apply(EDGE,1,denPre2D,classLabel=cLabel,DataFit=DataFit[-splitid,],
+                    newData=rbind(DataFit[splitid,],DataPre))
+      y <- classLabel[splitid]
+      cv.fit <- cv.glmnet(x=denX[1:length(y),], y=y, family = "binomial", nfolds=nfolds) 
+      yp <- predict(cv.fit,newx=denX[-(1:length(y)),], s="lambda.min",type="response")
+      preY <- cbind(preY,yp) 
+      coefs <- which(coef(cv.fit,s="lambda.min")[-1] !=0)
+      vset <- c(vset,coefs)     
+    } 
+    yPre <- rowMeans(preY) 
+    numb <- table(vset)
+    Vid <- as.numeric(rownames(numb))  
+    Eset <- cbind(EDGE[Vid,],numb)
+    Eset <- Eset[order(Eset[,3],decreasing=T),]
+    colnames(Eset) <- c("row","col","numb")
+  } 
+  list(yPre=yPre,Eset=Eset) 
+}
+
+
+
+jdinac.z <- function(EDGE,classLabel,DataFit,DataPre,zFit,zPre,nsplit=10,nfolds=5){
+  
+  if(class(zFit)!="matrix" | class(zPre)!="matrix")
+    stop("zFit and zPre must be 'matrix'")
+  if(nsplit<=0){       
+    stop("nsplit must be positive integer")  
+  } else {
+    preY <- NULL
+    vset <- NULL
+    for(i in 1:nsplit){
+      size0 <- sum(classLabel==0)
+      size1 <- sum(classLabel==1)
+      sn0 <- round(size0/2)
+      sn1 <- round(size1/2)
+      splitid <- c(sample(1:size0,sn0),sample((1:size1)+size0,sn1))
+    
+      cLabel <- classLabel[splitid]
+      denX <- apply(EDGE,1,denPre2D,classLabel=cLabel,DataFit=DataFit[splitid,],
+                    newData=rbind(DataFit[-splitid,],DataPre))
+      y <- classLabel[-splitid]
+      zfit <- zFit[-splitid, ,drop=F]
+      cv.fit <- cv.glmnet(x=cbind(zfit,denX[1:length(y),]), y=y, family = "binomial", nfolds=nfolds) 
+
+      yp <- predict(cv.fit,newx=cbind(zPre,denX[-(1:length(y)),]), s="lambda.min",type="response")
+      preY <- cbind(preY,yp) 
+      coefs <- which(coef(cv.fit,s="lambda.min")[-(1:(1+ncol(zFit)))] !=0)
+      vset <- c(vset,coefs)
+    
+      cLabel <- classLabel[-splitid]        
+      denX <- apply(EDGE,1,denPre2D,classLabel=cLabel,DataFit=DataFit[-splitid,],
+                    newData=rbind(DataFit[splitid,],DataPre))
+      y <- classLabel[splitid]
+      zfit <- zFit[splitid, ,drop=F]
+      cv.fit <- cv.glmnet(x=cbind(zfit,denX[1:length(y),]), y=y, family = "binomial", nfolds=nfolds) 
+      yp <- predict(cv.fit,newx=cbind(zPre,denX[-(1:length(y)),]), s="lambda.min",type="response")
+      preY <- cbind(preY,yp) 
+      coefs <- which(coef(cv.fit,s="lambda.min")[-(1:(1+ncol(zFit)))] !=0)
+      vset <- c(vset,coefs)     
+    } 
+    yPre <- rowMeans(preY) 
+    numb <- table(vset)
+    Vid <- as.numeric(rownames(numb))  
+    Eset <- cbind(EDGE[Vid,],numb)
+    Eset <- Eset[order(Eset[,3],decreasing=T),]
+    colnames(Eset) <- c("row","col","numb")
+  } 
+  list(yPre=yPre,Eset=Eset) 
+}
+```
+
+#Simulation
+```{r}
+adjM=array(1,dim=c(p,p))
+adjM[lower.tri(adjM,diag=T)] <- 0
+EDGE <- which(adjM!=0, arr.ind=T)
+
+difnet <- jdinac(EDGE=EDGE,classLabel=t(x),DataFit=t(df_expr),DataPre=t(df_expr),nsplit=5,nfolds=5)
+# difnet$Eset
+
+# Construct the DC network
+dnw_JDINAC <- matrix(0, p, p)
+if(nrow(difnet$Eset) > 0) {
+  dnw_JDINAC[cbind(difnet$Eset[, 1], difnet$Eset[, 2])] <- difnet$Eset[, 3]#Weights
+}
+# Symmetrize.
+dnw_JDINAC <- dnw_JDINAC + t(dnw_JDINAC)
+
+# Heatmap of estiamted DC network with JDINAC
+heatmap(abs(dnw_JDINAC), 
+        main = "JDINAC",
+        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE, 
+        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+# confusion matrix
+res5 = data.frame(difnet$Eset)
+names(res5)=c("Node1","Node2","Weight")
+together_intersect3=merge(pcor.origin, res5, by=c("Node1","Node2"),all=T)
+together_intersect3[is.na(together_intersect3)] <- 0
+label_jdinac <- rep(0, p*(p-1)/2)
+label_jdinac[which(together_intersect3$Weight != 0)] = 1
+metrics_jdinac <- confusionMatrix(factor(label_jdinac, levels = c('1', '0')),
+                                  factor(label_true, levels = c('1', '0')))
+metrics_jdinac
+
+# pr curve 
+pr <- pr.curve(together_intersect3$Weight[label_true == 1], together_intersect3$Weight[label_true == 0], curve = TRUE )
+plot(pr)
+```
+#DGCA
+```{r}
+# devtools::install_github("andymckenzie/DGCA")
+# install.packages("BiocManager")
+# BiocManager::install("GO.db")
+# BiocManager::install("impute")
+# BiocManager::install("preprocessCore")
+library("DGCA")
+case<-rep(c(1,0),each=n)
+control<-rep(c(0,1),each=n)
+y<-matrix(c(case,control),ncol=2)
+colnames(y)<-c("case","control")
+ddcor_res = ddcorAll(inputMat = df_expr, design = y, compare = c("case", "control"), adjust = "perm")
+
+# Construct the DC network
+dnw_DGCA <- matrix(0, p, p)
+if(nrow(ddcor_res) > 0) {
+  dnw_DGCA[cbind(strtoi(ddcor_res[, 1]), strtoi(ddcor_res[, 2]))] <- abs(ddcor_res[, 7])#abs(z-score)
+}
+# Symmetrize.
+dnw_DGCA <- dnw_DGCA + t(dnw_DGCA)
+
+# Heatmap of estiamted DC network 
+heatmap(abs(dnw_DGCA), 
+        main = "DGCA",
+        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE, 
+        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+# Confusion matrix
+# DGCA pvalue
+res6 = data.frame(ddcor_res[,c(1, 2)])
+names(res6) = c("Node1","Node2")
+res6$Node1=as.numeric(res6$Node1)
+res6$Node2=as.numeric(res6$Node2)
+res6["Binary"] = rep(0, nrow(res6))
+res6$Binary[ddcor_res$pValDiff<0.05 & ddcor_res$zScoreDiff<0] = -1
+res6$Binary[ddcor_res$pValDiff<0.05 & ddcor_res$zScoreDiff>0] = 1
+res6["Weight"] = abs(ddcor_res$zScoreDiff)#abs(z-score)
+together_intersect4=merge(pcor.origin, res6, by=c("Node1","Node2"), all=T)
+together_intersect4=together_intersect4[order(together_intersect4$Node1,together_intersect4$Node2),]
+label_dgca <- rep(0, p*(p-1)/2)
+label_dgca[which(together_intersect4$Binary != 0)] = 1
+metrics_dgca <- confusionMatrix(factor(label_dgca, levels = c('1', '0')),
+                                factor(label_true, levels = c('1', '0')))
+metrics_dgca
+
+# DGCA adjusted pvalue
+res7 = data.frame(ddcor_res[,c(1, 2)])
+names(res7) = c("Node1","Node2")
+res7$Node1=as.numeric(res7$Node1)
+res7$Node2=as.numeric(res7$Node2)
+res7["Binary"] = rep(0, nrow(res7))
+res7$Binary[ddcor_res$pValDiff_adj<0.05 & ddcor_res$zScoreDiff<0] = -1
+res7$Binary[ddcor_res$pValDiff_adj<0.05 & ddcor_res$zScoreDiff>0] = 1
+res7["Weight"] = abs(ddcor_res$zScoreDiff)#abs(z-score)
+together_intersect5=merge(pcor.origin, res7, by=c("Node1","Node2"),all=T)
+together_intersect5=together_intersect5[order(together_intersect5$Node1,together_intersect5$Node2),]
+label_dgca_adj <- rep(0, p*(p-1)/2)
+label_dgca_adj[which(together_intersect5$Binary != 0)] = 1
+metrics_dgca_adj <- confusionMatrix(factor(label_dgca_adj, levels = c('1', '0')),
+                                    factor(label_true, levels = c('1', '0')))
+metrics_dgca_adj
+
+# pr curve 
+# DGCA pvalue
+pr <- pr.curve(together_intersect4$Weight[label_true == 1], together_intersect4$Weight[label_true == 0], curve = TRUE )
+plot(pr)
+# DGCA adjusted pvalue
+pr <- pr.curve(together_intersect5$Weight[label_true == 1], together_intersect5$Weight[label_true == 0], curve = TRUE )
+plot(pr)
+```
+
+#DINGO
+```{r}
+# install.packages("iDINGO")
+library(iDINGO)
+y <- rep(c(0, 1), each = n)
+dingo_res=dingo(t(df_expr), y, diff.score = TRUE, B=10) #default B=100, takes too long
+dnw_dingo1=cbind(dingo_res$genepair,dingo_res$p.val)
+dnw_dingo1$gene1=as.numeric(dnw_dingo1$gene1)
+dnw_dingo1$gene2=as.numeric(dnw_dingo1$gene2)
+
+# Construct the DC network
+dnw_dingo <- matrix(0, p, p)
+if(nrow(dnw_dingo1) > 0) {
+  dnw_dingo[cbind(dnw_dingo1[, 1], dnw_dingo1[, 2])] <- abs(qnorm(1 - dnw_dingo1[,3]/2))#pvalue to zscore
+}
+# Symmetrize.
+dnw_dingo  <- dnw_dingo  + t(dnw_dingo)
+
+# Heatmap of estiamted DC network 
+heatmap(abs(dnw_dingo), 
+        main = "DINGO",
+        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE, 
+        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+# Confusion matrix
+res8 = data.frame(dnw_dingo1[,c(1, 2)])
+names(res8) = c("Node1","Node2")
+res8["Binary"] = rep(0, nrow(res8))
+res8$Binary[dnw_dingo1[,3]<0.05] = 1
+res8["Weight"] = abs(qnorm(1 - dnw_dingo1[,3]/2))
+together_intersect6=merge(pcor.origin, res8, by=c("Node1","Node2"),all=T)
+together_intersect6=together_intersect6[order(together_intersect6$Node1,together_intersect6$Node2),]
+label_dingo <- rep(0, p*(p-1)/2)
+label_dingo[which(together_intersect6$Binary != 0)] = 1
+metrics_dingo <- confusionMatrix(factor(label_dingo, levels = c('1', '0')),
+                                 factor(label_true, levels = c('1', '0')))
+metrics_dingo
+
+# pr curve 
+pr <- pr.curve(together_intersect6$Weight[label_true == 1], together_intersect6$Weight[label_true == 0], curve = TRUE )
+plot(pr)
+```
