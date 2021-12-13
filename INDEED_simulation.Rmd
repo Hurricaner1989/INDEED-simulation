@@ -1,234 +1,201 @@
 ---
-title: "New Indeed"
-author: "Yein Jeon"
-date: '2021 10 15 '
+title: "Indeed simulation"
 output: html_document
 ---
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+#Generate simulation data 
 ```{r}
-# install.packages("devtools")
-# library(devtools)
-# devtools::install_github("ressomlab/INDEED")
-library(INDEED)
+# install.packages("mvtnorm")
 library(mvtnorm)
-library(caret)
-# devtools::install_github('tgrimes/SeqNet')
-library(SeqNet)
-```
 
-#Build blank boxplots
-#Just run one time before data simulation
-```{r}
-# Blank boxplots for Indeed after corrections
-fpr.all_adj=c()
-fnr.all_adj=c()
-precision.all_adj=c()
-recall.all_adj=c()
-f.measure.all_adj=c()
-```
+######## Generate simulation data ########
+set.seed(42)
+n <- 100 # sample size (per network)
+p <- 10  # number of "genes" in the network.
 
-```{r}
-# Blank boxplots for Original Indeed
-fpr.all=c()
-fnr.all=c()
-precision.all=c()
-recall.all=c()
-f.measure.all=c()
-```
+#### Generate a precision matrix (pcor_matrix) for ground truth
+## Generate random nodes
+random_node <- rnbinom(p, p/2, prob=0.5)
+random_node <- (random_node - mean(random_node))/max(random_node)
+pcor_matrix_upper <- rep(0, p*(p-1)/2)
+random_node_position <- sample(1:(p*(p-1)/2), size=p, replace=F)
+pcor_matrix_upper[random_node_position] <- random_node
 
-#Original Indeed From Testing Script
-```{r}
-set.seed(0)
-n <- 100 # Sample size (per network)
-p <- 10  # Number of genes in the network.
-
-# Create a precision matrix. 
-# The network contains one hub gene (the 5th node).
-
-################################################################
-#####Adding Random Nodes for True Differential Network##########
-# create random nodes
-simdata=rnbinom(p,p/2,prob=0.5)
-simdata=(simdata-mean(simdata))/max(simdata)
-dat=rep(0,p*(p-1)/2)
-sample.dat=sample(1:(p*(p-1)/2),size=p,replace=F)
-dat[sample.dat]=simdata
-# assign random nodes to precision matrix
+## Assign random nodes to the precision matrix
 pcor_matrix <- diag(1, p)
-pcor_matrix[upper.tri(pcor_matrix, diag=FALSE)]=dat
-pcor_matrix=pcor_matrix+t(pcor_matrix)
-diag(pcor_matrix) <- rep(1, p)
+pcor_matrix[upper.tri(pcor_matrix, diag=FALSE)] <- pcor_matrix_upper
+pcor_matrix <- pcor_matrix + t(pcor_matrix) # symmetric
+diag(pcor_matrix) <- rep(1, p) # diagonal equal to 1
 
-# create hub node at middle node
-hub_node <- p/2
-pcor_matrix[hub_node, c(1:(hub_node-1),(hub_node+1):p)] <- rbinom(p - 1, 1, 0.5) * (-1)^rbinom(p - 1, 1, 0.5) *
-  runif(p - 1, 0.5, 1)
-pcor_matrix[c(1:(hub_node-1),(hub_node+1):p),hub_node] <- pcor_matrix[hub_node, c(1:(hub_node-1),(hub_node+1):p)]
+## Generate a hub node in the middle
+hub_node_position <- p/2
+pcor_matrix[hub_node_position, c(1:(hub_node_position-1), (hub_node_position+1):p)] <- rbinom(p - 1, 1, 0.5) * (-1)^rbinom(p - 1, 1, 0.5) * runif(p - 1, 0.5, 1)
+pcor_matrix[c(1:(hub_node_position-1), (hub_node_position+1):p), hub_node_position] <- pcor_matrix[hub_node_position, c(1:(hub_node_position-1),(hub_node_position+1):p)] # symmetric
 
-# add hub nodes
-# pcor_matrix[60, c(1:59,61:p)] <- rbinom(p - 1, 1, 0.5) * (-1)^rbinom(p - 1, 1, 0.5) *
-#   runif(p - 1, 0.5, 1)
-# pcor_matrix[c(1:59,61:p),60] <- pcor_matrix[60, c(1:59,61:p)]
-
-# pcor_matrix[30, c(1:29,31:59,61:p)] <- rbinom(p - 2, 1, 0.1) * (-1)^rbinom(p - 2, 1, 0.5) *
-#   runif(p - 2, 0.5, 1)
-# pcor_matrix[c(1:29,31:59,61:p),30] <- pcor_matrix[30, c(1:29,31:59,61:p)]
-# 
-# pcor_matrix[90, c(1:29,31:59,61:89,91:p)] <- rbinom(p - 3, 1, 0.05) * (-1)^rbinom(p - 3, 1, 0.5) *
-#   runif(p - 3, 0.5, 1)
-# pcor_matrix[c(1:29,31:59,61:89,91:p),90] <- pcor_matrix[90, c(1:29,31:59,61:89,91:p)]
-
-# Adjust the diagonal to obtain a valid precision matrix.
-min_eigen <-  min(eigen(pcor_matrix)$val)
-
-if(min_eigen < 0) {#keep it to be zero if it is originally zero
-  pcor_matrix <- pcor_matrix + diag(1, p) * (abs(min_eigen) + 0.1)
+## Adjust for a invertible precision matrix
+min_eigen <- min(eigen(pcor_matrix)$val)
+if(min_eigen <= 0) {
+  pcor_matrix <- pcor_matrix + diag(1, p) * (abs(min_eigen) + 0.1) # 0.1?
   pcor_matrix <- cov2cor(pcor_matrix)
 }
 
-# Obtain the covariance matrix.
+#### Generate simulation data from the precision matrix
+## Get the covariance matrix
 sigma <- solve(pcor_matrix)
-# Sample observations from the network containing a hub gene.
-x1 <- mvtnorm::rmvnorm(n, rep(0, p), sigma) 
-# Sample observations from a network containing no connections.
-x2 <- matrix(rnorm(n * p), nrow = n, ncol = p)
 
-# Combine both samples into one data.frame with rows corresponding to genes
-# and columns corresponding to observations.
-df_expr <- as.data.frame(t(rbind(x1, x2)))
-rownames(df_expr) <- 1:p # Generic names for genes.
-id <- matrix(1:p, ncol = 1) # Argument for select_rho_partial().
-x <- matrix(rep(c(0, 1), each = n), nrow = 1) # Indicate observation membership.
-x <- as.data.frame(x) # Argument for select_rho_partial()
+## Simulation data from the covariance matrix
+x_case <- rmvnorm(n, rep(0, p), sigma) 
 
-# Run INDEED (note, performance doesn't change if permutation is increased)
-res <- select_rho_partial(df_expr, x, id = id, error_curve = TRUE)
-res2 <- partial_cor(data_list = res, rho_group1 = 'min', rho_group2 = "min",
-                    permutation = 1000, permutation_thres = 0.05, fdr = F)
+## Simulation data from a control network containing no connections
+x_control <- rmvnorm(n, rep(0, p), diag(p))
 
-# Take 'diff_network' element from res2 and store as data.frame.
-res3 <- as.data.frame(res2$diff_network) # "Activity score" is ignored.
+## Convert samples into a dataframe with rows for "genes" and columns for observations
+x_df <- as.data.frame(t(rbind(x_case, x_control)))
 
-# Construct the DC network
-dnw_INDEED <- matrix(0, p, p)
-if(nrow(res3) > 0) {
-  # Index Node1 and Node2 in dnw_INDEED and update with Weight.
-  dnw_INDEED[cbind(res3[, 1], res3[, 2])] <- abs(res3[, 4])
-}
-# Symmetrize.
-dnw_INDEED <- dnw_INDEED + t(dnw_INDEED)
-
-# Run INDEED (note, performance doesn't change if permutation is increased)
-res2 <- partial_cor(data_list = res, rho_group1 = 'min', rho_group2 = "min",
-                    permutation = 1000, permutation_thres = 0.05, fdr = T)
-
-# Take 'diff_network' element from res2 and store as data.frame.
-res4 <- as.data.frame(res2$diff_network) # "Activity score" is ignored.
-
-# Construct the DC network
-dnw_INDEED_new <- matrix(0, p, p)
-if(nrow(res4) > 0) {
-  # Index Node1 and Node2 in dnw_INDEED and update with Weight.
-  dnw_INDEED_new[cbind(res4[, 1], res4[, 2])] <- abs(res4[, 4])
-}
-# Symmetrize.
-dnw_INDEED_new <- dnw_INDEED_new + t(dnw_INDEED_new)
-
-# Heatmap of the true differential network.
+#### Ground truth differential network map
 heatmap(abs(pcor_matrix - diag(p)), 
         main = "True Diff. Network",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
-# # Heatmap of DC network estimated directly by inverting the estimated covariance
-# # matrix. This is to demonstrate that the observations were simulated correctly.
-# pre_matrix_1 <- solve(cov(x1))
-# pre_matrix_2 <- solve(cov(x2))
-# 
-# pcor_matrix_1 <- diag(1, p)
-# for (i in 1:(p-1)){
-#  for (j in (i+1):p){
-#    pcor_matrix_1[i,j] <- -pre_matrix_1[i,j]/sqrt(pre_matrix_1[i,i] * pre_matrix_1[j,j])
-#    pcor_matrix_1[j,i] <- pcor_matrix_1[i,j]
-#  }
-# }
-# 
-# pcor_matrix_2 <- diag(1, p)
-# for (i in 1:(p-1)){
-#  for (j in (i+1):p){
-#    pcor_matrix_2[i,j] <- -pre_matrix_2[i,j]/sqrt(pre_matrix_2[i,i] * pre_matrix_2[j,j])
-#    pcor_matrix_2[j,i] <- pcor_matrix_2[i,j]
-#  }
-# }
-# 
-# heatmap(abs(pcor_matrix_1 - pcor_matrix_2),
-#        main = "Inverse Covariance",
-#        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
-#        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+#### Differential network map by inverting the covariance matrix (only for n > p)
+## Invert covariance matrix
+precision_matrix_case <- solve(cov(x_case))
+precision_matrix_control <- solve(cov(x_control))
 
-# Heatmap of estiamted DC network with Indeed_no_fdr.
-heatmap(abs(dnw_INDEED), 
+## Get partial correlation for case group
+pcor_matrix_case <- diag(1, p)
+for (i in 1:(p-1)){
+ for (j in (i+1):p){
+   pcor_matrix_case[i,j] <- -precision_matrix_case[i,j]/sqrt(precision_matrix_case[i,i] * precision_matrix_case[j,j])
+   pcor_matrix_case[j,i] <- pcor_matrix_case[i,j] 
+ }
+}
+
+## Get partial correlation for control group
+pcor_matrix_control <- diag(1, p)
+for (i in 1:(p-1)){
+ for (j in (i+1):p){
+   pcor_matrix_control[i,j] <- -precision_matrix_control[i,j]/sqrt(precision_matrix_control[i,i] * precision_matrix_control[j,j])
+   pcor_matrix_control[j,i] <- pcor_matrix_control[i,j]
+ }
+}
+
+## Get map
+heatmap(abs(pcor_matrix_case - pcor_matrix_control),
+       main = "Inverse Covariance",
+       symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
+       col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+## remove unnecessary variables
+rm(random_node, random_node_position, pcor_matrix_upper, hub_node_position, min_eigen, i, j, 
+   pcor_matrix_case, pcor_matrix_control, precision_matrix_case, precision_matrix_control)
+```
+
+# Run INDEED
+```{r}
+# install.packages("devtools")
+# library(devtools)
+# devtools::install_github("ressomlab/INDEED")
+library(INDEED)
+
+######## Run INDEED with multiple testing correction (fdr) and not ########
+#### Run INDEED with no fdr
+id <- matrix(1:p, ncol = 1) 
+y_class <- matrix(rep(c(0, 1), each = n), nrow = 1) # case = 0, control = 1
+model_indeed_tempt <- select_rho_partial(x_df, y_class, id = id, error_curve = TRUE)
+model_indeed_no_fdr <- partial_cor(data_list = model_indeed_tempt, rho_group1 = 'min', rho_group2 = "min",
+                                   permutation = 1000, permutation_thres = 0.05, fdr = F)
+
+## Get the differential network from INDEED with no fdr
+network_indeed_no_fdr <- model_indeed_no_fdr$diff_network
+network_matrix_indeed_no_fdr <- matrix(0, p, p)
+if(nrow(network_indeed_no_fdr) > 0) {
+  ## Node index and abs(Weight)
+  network_matrix_indeed_no_fdr[cbind(network_indeed_no_fdr$Node1, network_indeed_no_fdr$Node2)] <- abs(network_indeed_no_fdr$Weight)
+}
+network_matrix_indeed_no_fdr <- network_matrix_indeed_no_fdr + t(network_matrix_indeed_no_fdr) # symmetric and diagonal equal to 0
+
+#### Run INDEED with fdr
+model_indeed_fdr <- partial_cor(data_list = model_indeed_tempt, rho_group1 = 'min', rho_group2 = "min",
+                                   permutation = 1000, permutation_thres = 0.05, fdr = T)
+
+## Get the differential network from INDEED with fdr
+network_indeed_fdr <- model_indeed_fdr$diff_network
+network_matrix_indeed_fdr <- matrix(0, p, p)
+if(nrow(network_indeed_fdr) > 0) {
+  ## Node index and abs(Weight)
+  network_matrix_indeed_fdr[cbind(network_indeed_fdr$Node1, network_indeed_fdr$Node2)] <- abs(network_indeed_fdr$Weight)
+}
+network_matrix_indeed_fdr <- network_matrix_indeed_fdr + t(network_matrix_indeed_fdr) # symmetric and diagonal equal to 0
+
+#### INDEED with no fdr differential network map
+heatmap(abs(network_matrix_indeed_no_fdr), 
         main = "Indeed_no_fdr",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
-# Heatmap of estiamted DC network with Indeed_fdr.
-heatmap(abs(dnw_INDEED_new), 
+#### INDEED with fdr differential network map
+heatmap(abs(network_matrix_indeed_fdr), 
         main = "Indeed_fdr",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
-
-######################################
-#####Adding Confusion Matrix##########
-#Transfer Precision Matrix to Data Frame to express the connections between each pair of nodes
-pcor.origin2=pcor_matrix-diag(p)
-pcor.origin=vector()
-
+#### Confusion matrix
+# install.packages("caret")
+library(caret)
+## Get ground truth connections
+pcor_matrix_off_diag <- pcor_matrix - diag(p)
+pcor_connection <- c()
 for (i in 1:(p-1)){
   for (j in (i+1):p){
-    pcor.origin1=c(i,j,pcor.origin2[i,j])
-    pcor.origin=append(pcor.origin,pcor.origin1)
+    pcor_connection <- rbind(pcor_connection, c(i, j, pcor_matrix_off_diag[i,j]))
   }
 }
+pcor_connection <- data.frame(pcor_connection)
+names(pcor_connection)=c("Node1", "Node2", "PC")
 
-pcor.origin=matrix(pcor.origin,ncol=3,byrow=T)
-pcor.origin=data.frame(pcor.origin)
-names(pcor.origin)=c("Node1","Node2","precision")
-
-# indeed with no fdr
-together_intersect1=merge(pcor.origin, res3, by=c("Node1","Node2"),all=T)
-together_intersect1[is.na(together_intersect1)] <- 0
+## INDEED with no fdr confusion matrix
+pcor_connection_union_no_fdr <- merge(pcor_connection, network_indeed_no_fdr, by = c("Node1","Node2"), all=T)
+pcor_connection_union_no_fdr[is.na(pcor_connection_union_no_fdr)] <- 0
 label_true <- rep(0, p*(p-1)/2)
-label_true[which(together_intersect1$precision != 0)] = 1
+label_true[which(pcor_connection_union_no_fdr$PC != 0)] = 1
 label_indeed_no_fdr <- rep(0, p*(p-1)/2)
-label_indeed_no_fdr[which(together_intersect1$Binary != 0)] = 1
+label_indeed_no_fdr[which(pcor_connection_union_no_fdr$Binary != 0)] = 1
 metrics_indeed_no_fdr <- confusionMatrix(factor(label_indeed_no_fdr, levels = c('1', '0')), 
                                          factor(label_true, levels = c('1', '0')))
 metrics_indeed_no_fdr 
 
-# indeed with fdr
-together_intersect2=merge(pcor.origin, res4, by=c("Node1","Node2"),all=T)
-together_intersect2[is.na(together_intersect2)] <- 0
+## INDEED with fdr confusion matrix
+pcor_connection_union_fdr <- merge(pcor_connection, network_indeed_fdr, by = c("Node1","Node2"), all=T)
+pcor_connection_union_fdr[is.na(pcor_connection_union_fdr)] <- 0
 label_indeed_fdr <- rep(0, p*(p-1)/2)
-label_indeed_fdr[which(together_intersect2$Binary != 0)] = 1
+label_indeed_fdr[which(pcor_connection_union_fdr$Binary != 0)] = 1
 metrics_indeed_fdr <- confusionMatrix(factor(label_indeed_fdr, levels = c('1', '0')), 
                                       factor(label_true, levels = c('1', '0')))
-metrics_indeed_fdr
+metrics_indeed_fdr 
 
-##############################
-#####Adding PR curve##########
+#### Precision recall curve
 # install.packages("PRROC")
 library(PRROC)
-# pr curve for INDEED without fdr
-pr <- pr.curve(abs(together_intersect1$Weight[label_true == 1]), abs(together_intersect1$Weight[label_true == 0]), curve = TRUE )
-plot(pr)
-# pr curve for INDEED with fdr
-pr <- pr.curve(abs(together_intersect2$Weight[label_true == 1]), abs(together_intersect2$Weight[label_true == 0]), curve = TRUE )
-plot(pr)
+
+## pr curve for INDEED with no fdr
+pr_curve_indeed_no_fdr <- pr.curve(abs(pcor_connection_union_no_fdr$Weight[label_true == 1]), 
+                                   abs(pcor_connection_union_no_fdr$Weight[label_true == 0]), 
+                                   curve = TRUE)
+plot(pr_curve_indeed_no_fdr)
+
+## pr curve for INDEED with fdr
+pr_curve_indeed_fdr <- pr.curve(abs(pcor_connection_union_fdr$Weight[label_true == 1]),
+                                abs(pcor_connection_union_fdr$Weight[label_true == 0]), 
+                                curve = TRUE)
+plot(pr_curve_indeed_fdr)
+
+## remove unnecessary variables
+rm(model_indeed_tempt, i, j)
 
 ```
 
