@@ -95,14 +95,14 @@ rm(random_node, random_node_position, pcor_matrix_upper, hub_node_position, min_
    pcor_matrix_case, pcor_matrix_control, precision_matrix_case, precision_matrix_control)
 ```
 
-# Run INDEED
+# INDEED
 ```{r}
 # install.packages("devtools")
 # library(devtools)
 # devtools::install_github("ressomlab/INDEED")
 library(INDEED)
 
-######## Run INDEED with multiple testing correction (fdr) and not ########
+######## INDEED with multiple testing correction (fdr) and not ########
 #### Run INDEED with no fdr
 id <- matrix(1:p, ncol = 1) 
 y_class <- matrix(rep(c(0, 1), each = n), nrow = 1) # case = 0, control = 1
@@ -134,13 +134,13 @@ network_matrix_indeed_fdr <- network_matrix_indeed_fdr + t(network_matrix_indeed
 
 #### INDEED with no fdr differential network map
 heatmap(network_matrix_indeed_no_fdr, 
-        main = "Indeed_no_fdr",
+        main = "INDEED_no_fdr",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
 #### INDEED with fdr differential network map
 heatmap(network_matrix_indeed_fdr, 
-        main = "Indeed_fdr",
+        main = "INDEED_fdr",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
@@ -199,12 +199,12 @@ rm(model_indeed_tempt, i, j)
 
 ```
 
-# Run DNAPATH
+# DNAPATH
 ```{r}
 # install.packages("dnapath")
 library(dnapath)
 
-######## Run DNAPATH ########
+######## DNAPATH ########
 #### Run DNAPATH
 x_df_dnapath <- t(x_df)
 colnames(x_df_dnapath) <- id
@@ -235,7 +235,7 @@ network_matrix_dnapath <- network_matrix_dnapath + t(network_matrix_dnapath) # s
 
 #### Differential network map
 heatmap(network_matrix_dnapath, 
-        main = "Dnapath",
+        main = "DNAPATH",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
@@ -258,201 +258,57 @@ plot(pr_curve_dnapath)
 rm(x_df_dnapath, edge_dnapath, i, j, k)
 ```
 
-
-
-
-#JDINAC
-#Load codes
+# JDINAC
 ```{r}
-library(KernSmooth)
-# install.packages("akima")
-library(akima)
-library(glmnet)
+######## JDINAC ########
+#### Load JDINAC
+source("jdinac.R")
 
-denPre2D <- function(edge,classLabel,DataFit,newData,method=c("integers","bandwidth")[2]){
-  
-  Index0 <- which(classLabel==0)
-  Index1 <- which(classLabel==1)
-  x <- DataFit[c(Index0,Index1),edge[1]]
-  y <- DataFit[c(Index0,Index1),edge[2]]
-  x0 <- newData[,edge[1]]
-  y0 <- newData[,edge[2]]
-  N <- max(c(x,y))
-  coI <- 1:length(Index0)
-  caI <- length(Index0)+(1:length(Index1))
-  
-  caWidth <- c(bw.nrd0(x[caI]),bw.nrd0(y[caI]))
-  coWidth <- c(bw.nrd0(x[coI]),bw.nrd0(y[coI]))
-  gridSize <- switch(method,
-                     integers  = c(N, N),
-                     bandwidth = ceiling(N / c(min(caWidth[1], coWidth[1]), 
-                                               min(caWidth[2], coWidth[2]))))
-  gridSize <- pmax(gridSize,10) # make sure there are at least 100 points in total
+#### Run JDINAC
+edge_jdinac <- matrix(1, nrow = p, ncol = p)
+edge_jdinac[lower.tri(edge_jdinac, diag = T)] <- 0
+edge_jdinac <- which(edge_jdinac != 0, arr.ind = T)
+model_jdinac <- jdinac(EDGE = edge_jdinac, classLabel = t(y_class), DataFit = t(x_df), DataPre = t(x_df),
+                       nsplit = 5, nfolds = 5)
+network_jdinac <- model_jdinac$Eset
+network_jdinac <- data.frame(network_jdinac)
+names(network_jdinac) <- c("Node1", "Node2", "Weight")
 
-  caSmooth <- bkde2D(x=cbind(x[caI], y[caI]), bandwidth=caWidth,  gridsize=gridSize)
-  caP <- caSmooth$fhat
-  coSmooth <- bkde2D(x=cbind(x[coI], y[coI]), bandwidth=coWidth, gridsize=gridSize)
-  coP <- coSmooth$fhat
-
-  # make sure there are no zeros in the smooth function (since we will take a log of that)
-  # caP[caP==0] <- min(caP[caP>0])/100
-  caP <- pmax(caP, 1e-10)
-  # coP[coP==0] <- min(coP[coP>0])/100
-  coP <- pmax(coP, 1e-10)
-
-  cafit <- bicubic(x=caSmooth$x1, y=caSmooth$x2, z=caP, x0=x0,y0=y0)
-  cofit <- bicubic(x=coSmooth$x1, y=coSmooth$x2, z=coP, x0=x0,y0=y0)
-  cafit$z <- pmax(cafit$z, 1e-10)
-  cofit$z <- pmax(cofit$z, 1e-10)
-  denPre <- log(cafit$z/cofit$z)
-  denPre
+## Get the differential network matrix form for map visulization
+network_matrix_jdinac <- matrix(0, p, p)
+if(nrow(network_jdinac) > 0) {
+  ## Node index and Weight
+  network_matrix_jdinac[cbind(network_jdinac$Node1, network_jdinac$Node2)] <- network_jdinac$Weight
 }
+network_matrix_jdinac <- network_matrix_jdinac + t(network_matrix_jdinac) # symmetric and diagonal equal to 0
 
-
-
-jdinac <- function(EDGE,classLabel,DataFit,DataPre,zFit=NULL,zPre=NULL,nsplit=10,nfolds=5){
-  
-  if(missing(DataPre)) {
-    DataPre <- DataFit
-    zPre <- zFit
-  }  
-  if(!is.null(zFit) & !is.null(zPre)){
-    Pre.Z <- jdinac.z(EDGE=EDGE,classLabel=classLabel,DataFit=DataFit,DataPre=DataPre,
-                        zFit=zFit,zPre=zPre,nsplit=nsplit,nfolds=nfolds)
-    yPre <- Pre.Z$yPre
-    Eset <- Pre.Z$Eset
-  } else if(nsplit<=0){       
-    stop("nsplit must be positive integer")    
-  } else {
-    preY <- NULL
-    vset <- NULL
-    for(i in 1:nsplit){
-      size0 <- sum(classLabel==0)
-      size1 <- sum(classLabel==1)
-      sn0 <- round(size0/2)
-      sn1 <- round(size1/2)
-      splitid <- c(sample(1:size0,sn0),sample((1:size1)+size0,sn1))
-    
-      cLabel <- classLabel[splitid]        
-      denX <- apply(EDGE,1,denPre2D,classLabel=cLabel,DataFit=DataFit[splitid,],
-                    newData=rbind(DataFit[-splitid,],DataPre))
-      y <- classLabel[-splitid]
-      cv.fit <- cv.glmnet(x=denX[1:length(y),], y=y, family = "binomial", nfolds=nfolds) 
-      yp <- predict(cv.fit,newx=denX[-(1:length(y)),], s="lambda.min",type="response")
-      preY <- cbind(preY,yp) 
-      coefs <- which(coef(cv.fit,s="lambda.min")[-1] !=0)
-      vset <- c(vset,coefs)
-    
-      cLabel <- classLabel[-splitid]        
-      denX <- apply(EDGE,1,denPre2D,classLabel=cLabel,DataFit=DataFit[-splitid,],
-                    newData=rbind(DataFit[splitid,],DataPre))
-      y <- classLabel[splitid]
-      cv.fit <- cv.glmnet(x=denX[1:length(y),], y=y, family = "binomial", nfolds=nfolds) 
-      yp <- predict(cv.fit,newx=denX[-(1:length(y)),], s="lambda.min",type="response")
-      preY <- cbind(preY,yp) 
-      coefs <- which(coef(cv.fit,s="lambda.min")[-1] !=0)
-      vset <- c(vset,coefs)     
-    } 
-    yPre <- rowMeans(preY) 
-    numb <- table(vset)
-    Vid <- as.numeric(rownames(numb))  
-    Eset <- cbind(EDGE[Vid,],numb)
-    Eset <- Eset[order(Eset[,3],decreasing=T),]
-    colnames(Eset) <- c("row","col","numb")
-  } 
-  list(yPre=yPre,Eset=Eset) 
-}
-
-
-
-jdinac.z <- function(EDGE,classLabel,DataFit,DataPre,zFit,zPre,nsplit=10,nfolds=5){
-  
-  if(class(zFit)!="matrix" | class(zPre)!="matrix")
-    stop("zFit and zPre must be 'matrix'")
-  if(nsplit<=0){       
-    stop("nsplit must be positive integer")  
-  } else {
-    preY <- NULL
-    vset <- NULL
-    for(i in 1:nsplit){
-      size0 <- sum(classLabel==0)
-      size1 <- sum(classLabel==1)
-      sn0 <- round(size0/2)
-      sn1 <- round(size1/2)
-      splitid <- c(sample(1:size0,sn0),sample((1:size1)+size0,sn1))
-    
-      cLabel <- classLabel[splitid]
-      denX <- apply(EDGE,1,denPre2D,classLabel=cLabel,DataFit=DataFit[splitid,],
-                    newData=rbind(DataFit[-splitid,],DataPre))
-      y <- classLabel[-splitid]
-      zfit <- zFit[-splitid, ,drop=F]
-      cv.fit <- cv.glmnet(x=cbind(zfit,denX[1:length(y),]), y=y, family = "binomial", nfolds=nfolds) 
-
-      yp <- predict(cv.fit,newx=cbind(zPre,denX[-(1:length(y)),]), s="lambda.min",type="response")
-      preY <- cbind(preY,yp) 
-      coefs <- which(coef(cv.fit,s="lambda.min")[-(1:(1+ncol(zFit)))] !=0)
-      vset <- c(vset,coefs)
-    
-      cLabel <- classLabel[-splitid]        
-      denX <- apply(EDGE,1,denPre2D,classLabel=cLabel,DataFit=DataFit[-splitid,],
-                    newData=rbind(DataFit[splitid,],DataPre))
-      y <- classLabel[splitid]
-      zfit <- zFit[splitid, ,drop=F]
-      cv.fit <- cv.glmnet(x=cbind(zfit,denX[1:length(y),]), y=y, family = "binomial", nfolds=nfolds) 
-      yp <- predict(cv.fit,newx=cbind(zPre,denX[-(1:length(y)),]), s="lambda.min",type="response")
-      preY <- cbind(preY,yp) 
-      coefs <- which(coef(cv.fit,s="lambda.min")[-(1:(1+ncol(zFit)))] !=0)
-      vset <- c(vset,coefs)     
-    } 
-    yPre <- rowMeans(preY) 
-    numb <- table(vset)
-    Vid <- as.numeric(rownames(numb))  
-    Eset <- cbind(EDGE[Vid,],numb)
-    Eset <- Eset[order(Eset[,3],decreasing=T),]
-    colnames(Eset) <- c("row","col","numb")
-  } 
-  list(yPre=yPre,Eset=Eset) 
-}
-```
-
-#Simulation
-```{r}
-adjM=array(1,dim=c(p,p))
-adjM[lower.tri(adjM,diag=T)] <- 0
-EDGE <- which(adjM!=0, arr.ind=T)
-
-difnet <- jdinac(EDGE=EDGE,classLabel=t(x),DataFit=t(df_expr),DataPre=t(df_expr),nsplit=5,nfolds=5)
-# difnet$Eset
-
-# Construct the DC network
-dnw_JDINAC <- matrix(0, p, p)
-if(nrow(difnet$Eset) > 0) {
-  dnw_JDINAC[cbind(difnet$Eset[, 1], difnet$Eset[, 2])] <- difnet$Eset[, 3]#Weights
-}
-# Symmetrize.
-dnw_JDINAC <- dnw_JDINAC + t(dnw_JDINAC)
-
-# Heatmap of estiamted DC network with JDINAC
-heatmap(abs(dnw_JDINAC), 
+#### Differential network map
+heatmap(network_matrix_jdinac, 
         main = "JDINAC",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE, 
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
-# confusion matrix
-res5 = data.frame(difnet$Eset)
-names(res5)=c("Node1","Node2","Weight")
-together_intersect3=merge(pcor.origin, res5, by=c("Node1","Node2"),all=T)
-together_intersect3[is.na(together_intersect3)] <- 0
+#### Confusion matrix
+pcor_connection_union <- merge(pcor_connection, network_jdinac, by = c("Node1","Node2"), all=T)
+pcor_connection_union[is.na(pcor_connection_union)] <- 0
 label_jdinac <- rep(0, p*(p-1)/2)
-label_jdinac[which(together_intersect3$Weight != 0)] = 1
-metrics_jdinac <- confusionMatrix(factor(label_jdinac, levels = c('1', '0')),
+label_jdinac[which(pcor_connection_union$Weight != 0)] = 1
+metrics_jdinac <- confusionMatrix(factor(label_jdinac, levels = c('1', '0')), 
                                   factor(label_true, levels = c('1', '0')))
-metrics_jdinac
+metrics_jdinac 
 
-# pr curve 
-pr <- pr.curve(together_intersect3$Weight[label_true == 1], together_intersect3$Weight[label_true == 0], curve = TRUE )
-plot(pr)
+#### Precision recall curve 
+pr_curve_jdinac <- pr.curve(pcor_connection_union$Weight[label_true == 1], 
+                            pcor_connection_union$Weight[label_true == 0], 
+                            curve = TRUE)
+plot(pr_curve_jdinac)
+
+#### Remove unnecessary variables
+rm(edge_jdinac)
 ```
+
+
+
 #DGCA
 ```{r}
 # devtools::install_github("andymckenzie/DGCA")
