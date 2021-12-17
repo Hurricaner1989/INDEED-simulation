@@ -6,7 +6,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-#Generate simulation data 
+# Generate simulation data 
 ```{r}
 # install.packages("mvtnorm")
 library(mvtnorm)
@@ -90,7 +90,7 @@ heatmap(abs(pcor_matrix_case - pcor_matrix_control),
        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
-## remove unnecessary variables
+#### Remove unnecessary variables
 rm(random_node, random_node_position, pcor_matrix_upper, hub_node_position, min_eigen, i, j, 
    pcor_matrix_case, pcor_matrix_control, precision_matrix_case, precision_matrix_control)
 ```
@@ -133,13 +133,13 @@ if(nrow(network_indeed_fdr) > 0) {
 network_matrix_indeed_fdr <- network_matrix_indeed_fdr + t(network_matrix_indeed_fdr) # symmetric and diagonal equal to 0
 
 #### INDEED with no fdr differential network map
-heatmap(abs(network_matrix_indeed_no_fdr), 
+heatmap(network_matrix_indeed_no_fdr, 
         main = "Indeed_no_fdr",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
 #### INDEED with fdr differential network map
-heatmap(abs(network_matrix_indeed_fdr), 
+heatmap(network_matrix_indeed_fdr, 
         main = "Indeed_fdr",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
@@ -156,7 +156,7 @@ for (i in 1:(p-1)){
   }
 }
 pcor_connection <- data.frame(pcor_connection)
-names(pcor_connection)=c("Node1", "Node2", "PC")
+names(pcor_connection) <- c("Node1", "Node2", "PC")
 
 ## INDEED with no fdr confusion matrix
 pcor_connection_union_no_fdr <- merge(pcor_connection, network_indeed_no_fdr, by = c("Node1","Node2"), all=T)
@@ -182,32 +182,84 @@ metrics_indeed_fdr
 # install.packages("PRROC")
 library(PRROC)
 
-## pr curve for INDEED with no fdr
+## Get pr curve for INDEED with no fdr
 pr_curve_indeed_no_fdr <- pr.curve(abs(pcor_connection_union_no_fdr$Weight[label_true == 1]), 
                                    abs(pcor_connection_union_no_fdr$Weight[label_true == 0]), 
                                    curve = TRUE)
 plot(pr_curve_indeed_no_fdr)
 
-## pr curve for INDEED with fdr
+## Get pr curve for INDEED with fdr
 pr_curve_indeed_fdr <- pr.curve(abs(pcor_connection_union_fdr$Weight[label_true == 1]),
                                 abs(pcor_connection_union_fdr$Weight[label_true == 0]), 
                                 curve = TRUE)
 plot(pr_curve_indeed_fdr)
 
-## remove unnecessary variables
+#### Remove unnecessary variables
 rm(model_indeed_tempt, i, j)
 
 ```
 
-#dnapath
+# Run DNAPATH
 ```{r}
-# # install_version("dnapath", version = "0.6.9", repos = "http://cran.us.r-project.org")
-# # # install.packages("dnapath")
-# library(dnapath)
-# 
-# results <- dnapath(x = t(df_expr), groups = t(x), pathway_list = c(), n_perm = 100)
-# results
+# install.packages("dnapath")
+library(dnapath)
+
+######## Run DNAPATH ########
+#### Run DNAPATH
+x_df_dnapath <- t(x_df)
+colnames(x_df_dnapath) <- id
+rownames(x_df_dnapath) <- 1:nrow(x_df_dnapath)
+model_dnapath <- dnapath(x = x_df_dnapath, groups = t(y_class), pathway_list = NULL)
+edge_dnapath <- data.frame(summarize_edges(model_dnapath[[1]]))
+
+## Get the differential network from DNAPATH
+network_dnapath <- c()
+k <- 1
+for (i in 1:(p-1)){
+  for (j in (i+1):p){
+    network_dnapath <- rbind(network_dnapath, c(i, j, edge_dnapath[k, 3], edge_dnapath[k, 4]))
+    k <- k + 1
+  }
+}
+network_dnapath <- data.frame(network_dnapath)
+names(network_dnapath) <- c("Node1", "Node2", "DC_Score", "P_Value")
+network_dnapath <- network_dnapath[network_dnapath$P_Value < 0.05,]
+
+## Get the differential network matrix form for map visulization
+network_matrix_dnapath <- matrix(0, p, p)
+if(nrow(network_dnapath) > 0) {
+  ## Node index and DC_Score
+  network_matrix_dnapath[cbind(network_dnapath$Node1, network_dnapath$Node2)] <- network_dnapath$DC_Score
+}
+network_matrix_dnapath <- network_matrix_dnapath + t(network_matrix_dnapath) # symmetric and diagonal equal to 0
+
+#### Differential network map
+heatmap(network_matrix_dnapath, 
+        main = "Dnapath",
+        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
+        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+#### Confusion matrix
+pcor_connection_union <- merge(pcor_connection, network_dnapath, by = c("Node1","Node2"), all=T)
+pcor_connection_union[is.na(pcor_connection_union)] <- 0
+label_dnapath <- rep(0, p*(p-1)/2)
+label_dnapath[which(pcor_connection_union$P_Value != 0)] = 1
+metrics_dnapath <- confusionMatrix(factor(label_dnapath, levels = c('1', '0')), 
+                                   factor(label_true, levels = c('1', '0')))
+metrics_dnapath 
+
+#### Precision recall curve 
+pr_curve_dnapath <- pr.curve(pcor_connection_union$DC_Score[label_true == 1], 
+                             pcor_connection_union$DC_Score[label_true == 0], 
+                             curve = TRUE)
+plot(pr_curve_dnapath)
+
+#### Remove unnecessary variables
+rm(x_df_dnapath, edge_dnapath, i, j, k)
 ```
+
+
+
 
 #JDINAC
 #Load codes
