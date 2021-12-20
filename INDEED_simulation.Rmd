@@ -159,7 +159,7 @@ pcor_connection <- data.frame(pcor_connection)
 names(pcor_connection) <- c("Node1", "Node2", "PC")
 
 ## INDEED with no fdr confusion matrix
-pcor_connection_union_no_fdr <- merge(pcor_connection, network_indeed_no_fdr, by = c("Node1","Node2"), all=T)
+pcor_connection_union_no_fdr <- merge(pcor_connection, network_indeed_no_fdr, by = c("Node1","Node2"), all = T)
 pcor_connection_union_no_fdr[is.na(pcor_connection_union_no_fdr)] <- 0
 label_true <- rep(0, p*(p-1)/2)
 label_true[which(pcor_connection_union_no_fdr$PC != 0)] = 1
@@ -170,7 +170,7 @@ metrics_indeed_no_fdr <- confusionMatrix(factor(label_indeed_no_fdr, levels = c(
 metrics_indeed_no_fdr 
 
 ## INDEED with fdr confusion matrix
-pcor_connection_union_fdr <- merge(pcor_connection, network_indeed_fdr, by = c("Node1","Node2"), all=T)
+pcor_connection_union_fdr <- merge(pcor_connection, network_indeed_fdr, by = c("Node1","Node2"), all = T)
 pcor_connection_union_fdr[is.na(pcor_connection_union_fdr)] <- 0
 label_indeed_fdr <- rep(0, p*(p-1)/2)
 label_indeed_fdr[which(pcor_connection_union_fdr$Binary != 0)] = 1
@@ -225,7 +225,7 @@ network_dnapath <- data.frame(network_dnapath)
 names(network_dnapath) <- c("Node1", "Node2", "DC_Score", "P_Value")
 network_dnapath <- network_dnapath[network_dnapath$P_Value < 0.05,]
 
-## Get the differential network matrix form for map visulization
+## Get the differential network matrix form for map visualization
 network_matrix_dnapath <- matrix(0, p, p)
 if(nrow(network_dnapath) > 0) {
   ## Node index and DC_Score
@@ -240,7 +240,7 @@ heatmap(network_matrix_dnapath,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
 #### Confusion matrix
-pcor_connection_union <- merge(pcor_connection, network_dnapath, by = c("Node1","Node2"), all=T)
+pcor_connection_union <- merge(pcor_connection, network_dnapath, by = c("Node1","Node2"), all = T)
 pcor_connection_union[is.na(pcor_connection_union)] <- 0
 label_dnapath <- rep(0, p*(p-1)/2)
 label_dnapath[which(pcor_connection_union$P_Value != 0)] = 1
@@ -274,7 +274,7 @@ network_jdinac <- model_jdinac$Eset
 network_jdinac <- data.frame(network_jdinac)
 names(network_jdinac) <- c("Node1", "Node2", "Weight")
 
-## Get the differential network matrix form for map visulization
+## Get the differential network matrix form for map visualization
 network_matrix_jdinac <- matrix(0, p, p)
 if(nrow(network_jdinac) > 0) {
   ## Node index and Weight
@@ -289,7 +289,7 @@ heatmap(network_matrix_jdinac,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
 #### Confusion matrix
-pcor_connection_union <- merge(pcor_connection, network_jdinac, by = c("Node1","Node2"), all=T)
+pcor_connection_union <- merge(pcor_connection, network_jdinac, by = c("Node1","Node2"), all = T)
 pcor_connection_union[is.na(pcor_connection_union)] <- 0
 label_jdinac <- rep(0, p*(p-1)/2)
 label_jdinac[which(pcor_connection_union$Weight != 0)] = 1
@@ -307,119 +307,54 @@ plot(pr_curve_jdinac)
 rm(edge_jdinac)
 ```
 
-
-
-#DGCA
-```{r}
-# devtools::install_github("andymckenzie/DGCA")
-# install.packages("BiocManager")
-# BiocManager::install("GO.db")
-# BiocManager::install("impute")
-# BiocManager::install("preprocessCore")
-library("DGCA")
-case<-rep(c(1,0),each=n)
-control<-rep(c(0,1),each=n)
-y<-matrix(c(case,control),ncol=2)
-colnames(y)<-c("case","control")
-ddcor_res = ddcorAll(inputMat = df_expr, design = y, compare = c("case", "control"), adjust = "perm")
-
-# Construct the DC network
-dnw_DGCA <- matrix(0, p, p)
-if(nrow(ddcor_res) > 0) {
-  dnw_DGCA[cbind(strtoi(ddcor_res[, 1]), strtoi(ddcor_res[, 2]))] <- abs(ddcor_res[, 7])#abs(z-score)
-}
-# Symmetrize.
-dnw_DGCA <- dnw_DGCA + t(dnw_DGCA)
-
-# Heatmap of estiamted DC network 
-heatmap(abs(dnw_DGCA), 
-        main = "DGCA",
-        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE, 
-        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
-
-# Confusion matrix
-# DGCA pvalue
-res6 = data.frame(ddcor_res[,c(1, 2)])
-names(res6) = c("Node1","Node2")
-res6$Node1=as.numeric(res6$Node1)
-res6$Node2=as.numeric(res6$Node2)
-res6["Binary"] = rep(0, nrow(res6))
-res6$Binary[ddcor_res$pValDiff<0.05 & ddcor_res$zScoreDiff<0] = -1
-res6$Binary[ddcor_res$pValDiff<0.05 & ddcor_res$zScoreDiff>0] = 1
-res6["Weight"] = abs(ddcor_res$zScoreDiff)#abs(z-score)
-together_intersect4=merge(pcor.origin, res6, by=c("Node1","Node2"), all=T)
-together_intersect4=together_intersect4[order(together_intersect4$Node1,together_intersect4$Node2),]
-label_dgca <- rep(0, p*(p-1)/2)
-label_dgca[which(together_intersect4$Binary != 0)] = 1
-metrics_dgca <- confusionMatrix(factor(label_dgca, levels = c('1', '0')),
-                                factor(label_true, levels = c('1', '0')))
-metrics_dgca
-
-# DGCA adjusted pvalue
-res7 = data.frame(ddcor_res[,c(1, 2)])
-names(res7) = c("Node1","Node2")
-res7$Node1=as.numeric(res7$Node1)
-res7$Node2=as.numeric(res7$Node2)
-res7["Binary"] = rep(0, nrow(res7))
-res7$Binary[ddcor_res$pValDiff_adj<0.05 & ddcor_res$zScoreDiff<0] = -1
-res7$Binary[ddcor_res$pValDiff_adj<0.05 & ddcor_res$zScoreDiff>0] = 1
-res7["Weight"] = abs(ddcor_res$zScoreDiff)#abs(z-score)
-together_intersect5=merge(pcor.origin, res7, by=c("Node1","Node2"),all=T)
-together_intersect5=together_intersect5[order(together_intersect5$Node1,together_intersect5$Node2),]
-label_dgca_adj <- rep(0, p*(p-1)/2)
-label_dgca_adj[which(together_intersect5$Binary != 0)] = 1
-metrics_dgca_adj <- confusionMatrix(factor(label_dgca_adj, levels = c('1', '0')),
-                                    factor(label_true, levels = c('1', '0')))
-metrics_dgca_adj
-
-# pr curve 
-# DGCA pvalue
-pr <- pr.curve(together_intersect4$Weight[label_true == 1], together_intersect4$Weight[label_true == 0], curve = TRUE )
-plot(pr)
-# DGCA adjusted pvalue
-pr <- pr.curve(together_intersect5$Weight[label_true == 1], together_intersect5$Weight[label_true == 0], curve = TRUE )
-plot(pr)
-```
-
-#DINGO
+# DINGO
 ```{r}
 # install.packages("iDINGO")
 library(iDINGO)
-y <- rep(c(0, 1), each = n)
-dingo_res=dingo(t(df_expr), y, diff.score = TRUE, B=10) #default B=100, takes too long
-dnw_dingo1=cbind(dingo_res$genepair,dingo_res$p.val)
-dnw_dingo1$gene1=as.numeric(dnw_dingo1$gene1)
-dnw_dingo1$gene2=as.numeric(dnw_dingo1$gene2)
 
-# Construct the DC network
-dnw_dingo <- matrix(0, p, p)
-if(nrow(dnw_dingo1) > 0) {
-  dnw_dingo[cbind(dnw_dingo1[, 1], dnw_dingo1[, 2])] <- abs(qnorm(1 - dnw_dingo1[,3]/2))#pvalue to zscore
+######## DINGO ########
+#### Run DINGO
+x_df_dingo <- t(x_df)
+colnames(x_df_dingo) <- id
+rownames(x_df_dingo) <- 1:nrow(x_df_dingo)
+y_class_dingo <- rep(c(0, 1), each = n)
+model_dingo <- dingo(x_df_dingo, y_class_dingo, diff.score = TRUE, B = 10) #default B=100, takes too long
+network_dingo <- cbind(model_dingo$genepair, model_dingo$p.val, model_dingo$diff.score)
+network_dingo$gene1=as.numeric(network_dingo$gene1)
+network_dingo$gene2=as.numeric(network_dingo$gene2)
+names(network_dingo) <- c("Node1", "Node2", "P_Value", "Diff_Score")
+
+## Get the differential network matrix form for map visualization
+network_matrix_dingo <- matrix(0, p, p)
+if(nrow(network_dingo) > 0) {
+  ## Node index and Diff_Score
+  network_matrix_dingo[cbind(network_dingo$Node1, network_dingo$Node2)] <- abs(network_dingo$Diff_Score)
 }
-# Symmetrize.
-dnw_dingo  <- dnw_dingo  + t(dnw_dingo)
+network_matrix_dingo <- network_matrix_dingo + t(network_matrix_dingo) # symmetric and diagonal equal to 0
 
-# Heatmap of estiamted DC network 
-heatmap(abs(dnw_dingo), 
+#### Differential network map
+heatmap(network_matrix_dingo, 
         main = "DINGO",
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE, 
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
-# Confusion matrix
-res8 = data.frame(dnw_dingo1[,c(1, 2)])
-names(res8) = c("Node1","Node2")
-res8["Binary"] = rep(0, nrow(res8))
-res8$Binary[dnw_dingo1[,3]<0.05] = 1
-res8["Weight"] = abs(qnorm(1 - dnw_dingo1[,3]/2))
-together_intersect6=merge(pcor.origin, res8, by=c("Node1","Node2"),all=T)
-together_intersect6=together_intersect6[order(together_intersect6$Node1,together_intersect6$Node2),]
+#### Confusion matrix
+network_dingo <- network_dingo[network_dingo$P_Value < 0.05,]
+pcor_connection_union <- merge(pcor_connection, network_dingo, by = c("Node1","Node2"), all = T)
+pcor_connection_union[is.na(pcor_connection_union)] <- 0
+names(pcor_connection_union) <- c("Node1", "Node2", "PC", "Binary", "Weight")
 label_dingo <- rep(0, p*(p-1)/2)
-label_dingo[which(together_intersect6$Binary != 0)] = 1
-metrics_dingo <- confusionMatrix(factor(label_dingo, levels = c('1', '0')),
+label_dingo[which(pcor_connection_union$Binary != 0)] = 1
+metrics_dingo <- confusionMatrix(factor(label_dingo, levels = c('1', '0')), 
                                  factor(label_true, levels = c('1', '0')))
-metrics_dingo
+metrics_dingo 
 
-# pr curve 
-pr <- pr.curve(together_intersect6$Weight[label_true == 1], together_intersect6$Weight[label_true == 0], curve = TRUE )
-plot(pr)
+#### Precision recall curve 
+pr_curve_dingo <- pr.curve(abs(pcor_connection_union$Weight[label_true == 1]), 
+                           abs(pcor_connection_union$Weight[label_true == 0]), 
+                           curve = TRUE)
+plot(pr_curve_dingo)
+
+#### Remove unnecessary variables
+rm(x_df_dingo, y_class_dingo)
 ```
