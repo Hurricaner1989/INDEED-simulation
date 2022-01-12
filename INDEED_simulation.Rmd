@@ -318,7 +318,7 @@ x_df_dingo <- t(x_df)
 colnames(x_df_dingo) <- id
 rownames(x_df_dingo) <- 1:nrow(x_df_dingo)
 y_class_dingo <- rep(c(0, 1), each = n)
-model_dingo <- dingo(x_df_dingo, y_class_dingo, diff.score = TRUE, B = 10) #default B=100, takes too long
+model_dingo <- dingo(x_df_dingo, y_class_dingo, diff.score = TRUE, B = 50) #default B=100, takes too long
 network_dingo <- cbind(model_dingo$genepair, model_dingo$p.val, model_dingo$diff.score)
 network_dingo$gene1=as.numeric(network_dingo$gene1)
 network_dingo$gene2=as.numeric(network_dingo$gene2)
@@ -357,4 +357,5 @@ plot(pr_curve_dingo)
 
 #### Remove unnecessary variables
 rm(x_df_dingo, y_class_dingo)
+
 ```
