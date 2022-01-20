@@ -14,7 +14,7 @@ library(mvtnorm)
 ######## Generate simulation data ########
 set.seed(42)
 n <- 100 # sample size (per network)
-p <- 10  # number of "genes" in the network.
+p <- 100  # number of "genes" in the network.
 
 #### Generate a precision matrix (pcor_matrix) for ground truth
 ## Generate random nodes
@@ -62,33 +62,33 @@ heatmap(abs(pcor_matrix - diag(p)),
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
 #### Differential network map by inverting the covariance matrix (only for n > p)
-## Invert covariance matrix
-precision_matrix_case <- solve(cov(x_case))
-precision_matrix_control <- solve(cov(x_control))
-
-## Get partial correlation for case group
-pcor_matrix_case <- diag(1, p)
-for (i in 1:(p-1)){
- for (j in (i+1):p){
-   pcor_matrix_case[i,j] <- -precision_matrix_case[i,j]/sqrt(precision_matrix_case[i,i] * precision_matrix_case[j,j])
-   pcor_matrix_case[j,i] <- pcor_matrix_case[i,j] 
- }
-}
-
-## Get partial correlation for control group
-pcor_matrix_control <- diag(1, p)
-for (i in 1:(p-1)){
- for (j in (i+1):p){
-   pcor_matrix_control[i,j] <- -precision_matrix_control[i,j]/sqrt(precision_matrix_control[i,i] * precision_matrix_control[j,j])
-   pcor_matrix_control[j,i] <- pcor_matrix_control[i,j]
- }
-}
-
-## Get map
-heatmap(abs(pcor_matrix_case - pcor_matrix_control),
-       main = "Inverse Covariance",
-       symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
-       col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+# ## Invert covariance matrix
+# precision_matrix_case <- solve(cov(x_case))
+# precision_matrix_control <- solve(cov(x_control))
+# 
+# ## Get partial correlation for case group
+# pcor_matrix_case <- diag(1, p)
+# for (i in 1:(p-1)){
+#  for (j in (i+1):p){
+#    pcor_matrix_case[i,j] <- -precision_matrix_case[i,j]/sqrt(precision_matrix_case[i,i] * precision_matrix_case[j,j])
+#    pcor_matrix_case[j,i] <- pcor_matrix_case[i,j] 
+#  }
+# }
+# 
+# ## Get partial correlation for control group
+# pcor_matrix_control <- diag(1, p)
+# for (i in 1:(p-1)){
+#  for (j in (i+1):p){
+#    pcor_matrix_control[i,j] <- -precision_matrix_control[i,j]/sqrt(precision_matrix_control[i,i] * precision_matrix_control[j,j])
+#    pcor_matrix_control[j,i] <- pcor_matrix_control[i,j]
+#  }
+# }
+# 
+# ## Get map
+# heatmap(abs(pcor_matrix_case - pcor_matrix_control),
+#        main = "Inverse Covariance",
+#        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
+#        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
 #### Remove unnecessary variables
 rm(random_node, random_node_position, pcor_matrix_upper, hub_node_position, min_eigen, i, j, 
