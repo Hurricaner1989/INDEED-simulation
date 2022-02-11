@@ -202,7 +202,7 @@ rm(model_indeed_tempt, i, j)
 # DNAPATH
 ```{r}
 # install.packages("dnapath")
-library(dnapath)
+library(dnapath) # 0.6.11 version
 
 ######## DNAPATH ########
 #### Run DNAPATH
@@ -262,7 +262,7 @@ rm(x_df_dnapath, edge_dnapath, i, j, k)
 ```{r}
 ######## JDINAC ########
 #### Load JDINAC
-source("jdinac.R")
+source("jdinac.R") # from github page
 
 #### Run JDINAC
 edge_jdinac <- matrix(1, nrow = p, ncol = p)
@@ -307,7 +307,7 @@ plot(pr_curve_jdinac)
 rm(edge_jdinac)
 ```
 
-# DINGO
+# DINGO (ignore for now)
 ```{r}
 # install.packages("iDINGO")
 library(iDINGO)
