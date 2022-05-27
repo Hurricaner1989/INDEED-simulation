@@ -1,0 +1,303 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Generate simulation data
+
+```{r}
+# install.packages("mvtnorm")
+library(mvtnorm)
+
+######## Generate simulation data ########
+set.seed(42)
+n <- 25 # sample size (per network)
+p <- 100  # number of "genes" in the network.
+
+#### Generate a precision matrix (pcor_matrix) for ground truth
+## Generate random nodes
+random_node <- rnbinom(p, p/2, prob=0.5)
+random_node <- (random_node - mean(random_node))/max(random_node)
+pcor_matrix_upper <- rep(0, p*(p-1)/2)
+random_node_position <- sample(1:(p*(p-1)/2), size=p, replace=F)
+pcor_matrix_upper[random_node_position] <- random_node
+
+## Assign random nodes to the precision matrix
+pcor_matrix <- diag(1, p)
+pcor_matrix[upper.tri(pcor_matrix, diag=FALSE)] <- pcor_matrix_upper
+pcor_matrix <- pcor_matrix + t(pcor_matrix) # symmetric
+diag(pcor_matrix) <- rep(1, p) # diagonal equal to 1
+
+## Generate a hub node in the middle
+hub_node_position <- p/2
+pcor_matrix[hub_node_position, c(1:(hub_node_position-1), (hub_node_position+1):p)] <- rbinom(p - 1, 1, 0.5) * (-1)^rbinom(p - 1, 1, 0.5) * runif(p - 1, 0.5, 1)
+pcor_matrix[c(1:(hub_node_position-1), (hub_node_position+1):p), hub_node_position] <- pcor_matrix[hub_node_position, c(1:(hub_node_position-1),(hub_node_position+1):p)] # symmetric
+
+## Adjust for a invertible precision matrix
+min_eigen <- min(eigen(pcor_matrix)$val)
+if(min_eigen <= 0) {
+  pcor_matrix <- pcor_matrix + diag(1, p) * (abs(min_eigen) + 0.1) # 0.1?
+  pcor_matrix <- cov2cor(pcor_matrix)
+}
+
+#### Generate simulation data from the precision matrix
+## Get the covariance matrix
+sigma <- solve(pcor_matrix)
+
+## Simulation data from the covariance matrix
+x_case <- rmvnorm(n, rep(0, p), sigma) 
+
+## Simulation data from a control network containing no connections
+x_control <- rmvnorm(n, rep(0, p), diag(p))
+
+## Convert samples into a dataframe with rows for "genes" and columns for observations
+x_df <- as.data.frame(t(rbind(x_case, x_control)))
+
+#### Ground truth differential network map
+heatmap(abs(pcor_matrix - diag(p)), 
+        main = "True Diff. Network",
+        symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
+        col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
+
+rm(random_node, random_node_position, pcor_matrix_upper, hub_node_position, min_eigen, i, j, 
+   pcor_matrix_case, pcor_matrix_control, precision_matrix_case, precision_matrix_control)
+```
+
+```{r}
+library('tictoc')
+indeed_recall_list <- c()
+indeed_precision_list <- c()
+indeed_auc_list <- c()
+
+indeed_fdr_recall_list <- c()
+indeed_fdr_precision_list <- c()
+indeed_fdr_auc_list <- c()
+
+dnapath_recall_list <- c()
+dnapath_precision_list <- c()
+dnapath_auc_list <- c()
+
+jdinac_recall_list <- c()
+jdinac_precision_list <- c()
+jdinac_auc_list <- c()
+
+
+for (iter in 1:5) {
+  set.seed(iter)
+  
+  library(INDEED)
+  ######## INDEED with multiple testing correction (fdr) and not ########
+  #### Run INDEED with no fdr
+  id <- matrix(1:p, ncol = 1) 
+  y_class <- matrix(rep(c(0, 1), each = n), nrow = 1) # case = 0, control = 1
+  
+  tic('Indeed')
+  model_indeed_tempt <- select_rho_partial(x_df, y_class, id = id, error_curve = TRUE)
+  model_indeed_no_fdr <- partial_cor(data_list = model_indeed_tempt, rho_group1 = 'min', rho_group2 = "min",
+                                     permutation = 1000, permutation_thres = 0.05, fdr = F)
+  toc(log = TRUE, quiet = TRUE)
+  
+  ## Get the differential network from INDEED with no fdr
+  network_indeed_no_fdr <- model_indeed_no_fdr$diff_network
+  network_matrix_indeed_no_fdr <- matrix(0, p, p)
+  if(nrow(network_indeed_no_fdr) > 0) {
+    ## Node index and abs(Weight)
+    network_matrix_indeed_no_fdr[cbind(network_indeed_no_fdr$Node1, network_indeed_no_fdr$Node2)] <- abs(network_indeed_no_fdr$Weight)
+  }
+  network_matrix_indeed_no_fdr <- network_matrix_indeed_no_fdr + t(network_matrix_indeed_no_fdr) # symmetric and diagonal equal to 0
+  
+  #### Run INDEED with fdr
+  tic('Indeed fdr')
+  model_indeed_tempt <- select_rho_partial(x_df, y_class, id = id, error_curve = TRUE)
+  model_indeed_fdr <- partial_cor(data_list = model_indeed_tempt, rho_group1 = 'min', rho_group2 = "min",
+                                     permutation = 1000, permutation_thres = 0.05, fdr = T)
+  toc(log = TRUE, quiet = TRUE)
+  
+  ## Get the differential network from INDEED with fdr
+  network_indeed_fdr <- model_indeed_fdr$diff_network
+  network_matrix_indeed_fdr <- matrix(0, p, p)
+  if(nrow(network_indeed_fdr) > 0) {
+    ## Node index and abs(Weight)
+    network_matrix_indeed_fdr[cbind(network_indeed_fdr$Node1, network_indeed_fdr$Node2)] <- abs(network_indeed_fdr$Weight)
+  }
+  network_matrix_indeed_fdr <- network_matrix_indeed_fdr + t(network_matrix_indeed_fdr) # symmetric and diagonal equal to 0
+  
+  #### Confusion matrix
+  # install.packages("caret")
+  library(caret)
+  ## Get ground truth connections
+  pcor_matrix_off_diag <- pcor_matrix - diag(p)
+  pcor_connection <- c()
+  for (i in 1:(p-1)){
+    for (j in (i+1):p){
+      pcor_connection <- rbind(pcor_connection, c(i, j, pcor_matrix_off_diag[i,j]))
+    }
+  }
+  pcor_connection <- data.frame(pcor_connection)
+  names(pcor_connection) <- c("Node1", "Node2", "PC")
+  
+  ## INDEED with no fdr confusion matrix
+  pcor_connection_union_no_fdr <- merge(pcor_connection, network_indeed_no_fdr, by = c("Node1","Node2"), all = T)
+  pcor_connection_union_no_fdr[is.na(pcor_connection_union_no_fdr)] <- 0
+  label_true <- rep(0, p*(p-1)/2)
+  label_true[which(pcor_connection_union_no_fdr$PC != 0)] = 1
+  label_indeed_no_fdr <- rep(0, p*(p-1)/2)
+  label_indeed_no_fdr[which(pcor_connection_union_no_fdr$Binary != 0)] = 1
+  metrics_indeed_no_fdr <- confusionMatrix(factor(label_indeed_no_fdr, levels = c('1', '0')), 
+                                           factor(label_true, levels = c('1', '0')))
+  # metrics_indeed_no_fdr
+  indeed_precision_list <- append(indeed_precision_list, metrics_indeed_no_fdr$byClass[5])
+  indeed_recall_list <- append(indeed_recall_list, metrics_indeed_no_fdr$byClass[6])
+  
+  ## INDEED with fdr confusion matrix
+  pcor_connection_union_fdr <- merge(pcor_connection, network_indeed_fdr, by = c("Node1","Node2"), all = T)
+  pcor_connection_union_fdr[is.na(pcor_connection_union_fdr)] <- 0
+  label_indeed_fdr <- rep(0, p*(p-1)/2)
+  label_indeed_fdr[which(pcor_connection_union_fdr$Binary != 0)] = 1
+  metrics_indeed_fdr <- confusionMatrix(factor(label_indeed_fdr, levels = c('1', '0')), 
+                                        factor(label_true, levels = c('1', '0')))
+  # metrics_indeed_fdr
+  indeed_fdr_precision_list <- append(indeed_fdr_precision_list, metrics_indeed_fdr$byClass[5])
+  indeed_fdr_recall_list <- append(indeed_fdr_recall_list, metrics_indeed_fdr$byClass[6])
+  
+  #### Precision recall curve
+  # install.packages("PRROC")
+  library(PRROC)
+  
+  ## Get pr curve for INDEED with no fdr
+  pr_curve_indeed_no_fdr <- pr.curve(abs(pcor_connection_union_no_fdr$Weight[label_true == 1]), 
+                                     abs(pcor_connection_union_no_fdr$Weight[label_true == 0]), 
+                                     curve = TRUE)
+
+  indeed_auc_list <- append(indeed_auc_list, pr_curve_indeed_no_fdr$auc.integral)
+  
+  
+  ## Get pr curve for INDEED with fdr
+  pr_curve_indeed_fdr <- pr.curve(abs(pcor_connection_union_fdr$Weight[label_true == 1]),
+                                  abs(pcor_connection_union_fdr$Weight[label_true == 0]), 
+                                  curve = TRUE)
+  
+  indeed_fdr_auc_list <- append(indeed_fdr_auc_list, pr_curve_indeed_fdr$auc.integral)
+  
+  
+  #### Remove unnecessary variables
+  rm(model_indeed_tempt, i, j)
+  
+  
+  library(dnapath) # 0.6.11 version
+  tic('DNAPATH')
+  ######## DNAPATH ########
+  #### Run DNAPATH
+  x_df_dnapath <- t(x_df)
+  colnames(x_df_dnapath) <- id
+  rownames(x_df_dnapath) <- 1:nrow(x_df_dnapath)
+  model_dnapath <- dnapath(x = x_df_dnapath, groups = t(y_class), pathway_list = NULL)
+  edge_dnapath <- data.frame(summarize_edges(model_dnapath[[1]]))
+  
+  ## Get the differential network from DNAPATH
+  network_dnapath <- c()
+  k <- 1
+  for (i in 1:(p-1)){
+    for (j in (i+1):p){
+      network_dnapath <- rbind(network_dnapath, c(i, j, edge_dnapath[k, 3], edge_dnapath[k, 4]))
+      k <- k + 1
+    }
+  }
+  network_dnapath <- data.frame(network_dnapath)
+  names(network_dnapath) <- c("Node1", "Node2", "DC_Score", "P_Value")
+  network_dnapath <- network_dnapath[network_dnapath$P_Value < 0.05,]
+  
+  ## Get the differential network matrix form for map visualization
+  network_matrix_dnapath <- matrix(0, p, p)
+  if(nrow(network_dnapath) > 0) {
+    ## Node index and DC_Score
+    network_matrix_dnapath[cbind(network_dnapath$Node1, network_dnapath$Node2)] <- network_dnapath$DC_Score
+  }
+  network_matrix_dnapath <- network_matrix_dnapath + t(network_matrix_dnapath) # symmetric and diagonal equal to 0
+  
+  #### Confusion matrix
+  pcor_connection_union <- merge(pcor_connection, network_dnapath, by = c("Node1","Node2"), all = T)
+  pcor_connection_union[is.na(pcor_connection_union)] <- 0
+  label_dnapath <- rep(0, p*(p-1)/2)
+  label_dnapath[which(pcor_connection_union$P_Value != 0)] = 1
+  metrics_dnapath <- confusionMatrix(factor(label_dnapath, levels = c('1', '0')), 
+                                     factor(label_true, levels = c('1', '0')))
+  # metrics_dnapath
+  dnapath_precision_list <- append(dnapath_precision_list, metrics_dnapath$byClass[5])
+  dnapath_recall_list <- append(dnapath_recall_list, metrics_dnapath$byClass[6])
+  
+  #### Precision recall curve 
+  pr_curve_dnapath <- pr.curve(pcor_connection_union$DC_Score[label_true == 1], 
+                               pcor_connection_union$DC_Score[label_true == 0], 
+                               curve = TRUE)
+  
+  dnapath_auc_list <- append(dnapath_auc_list, pr_curve_dnapath$auc.davis.goadrich)
+  toc(log = TRUE, quiet = TRUE)
+  #### Remove unnecessary variables
+  rm(x_df_dnapath, edge_dnapath, i, j, k)
+  
+  
+  ######## JDINAC ########
+  #### Load JDINAC
+  source("jdinac.R") # from github page
+  tic('JDNAC')
+  #### Run JDINAC
+  edge_jdinac <- matrix(1, nrow = p, ncol = p)
+  edge_jdinac[lower.tri(edge_jdinac, diag = T)] <- 0
+  edge_jdinac <- which(edge_jdinac != 0, arr.ind = T)
+  model_jdinac <- jdinac(EDGE = edge_jdinac, classLabel = t(y_class), DataFit = t(x_df), DataPre = t(x_df),
+                         nsplit = 5, nfolds = 5)
+  network_jdinac <- model_jdinac$Eset
+  network_jdinac <- data.frame(network_jdinac)
+  names(network_jdinac) <- c("Node1", "Node2", "Weight")
+  
+  ## Get the differential network matrix form for map visualization
+  network_matrix_jdinac <- matrix(0, p, p)
+  if(nrow(network_jdinac) > 0) {
+    ## Node index and Weight
+    network_matrix_jdinac[cbind(network_jdinac$Node1, network_jdinac$Node2)] <- network_jdinac$Weight
+  }
+  network_matrix_jdinac <- network_matrix_jdinac + t(network_matrix_jdinac) # symmetric and diagonal equal to 0
+  
+  #### Confusion matrix
+  pcor_connection_union <- merge(pcor_connection, network_jdinac, by = c("Node1","Node2"), all = T)
+  pcor_connection_union[is.na(pcor_connection_union)] <- 0
+  label_jdinac <- rep(0, p*(p-1)/2)
+  label_jdinac[which(pcor_connection_union$Weight != 0)] = 1
+  metrics_jdinac <- confusionMatrix(factor(label_jdinac, levels = c('1', '0')), 
+                                    factor(label_true, levels = c('1', '0')))
+  # metrics_jdinac 
+  jdinac_precision_list <- append(jdinac_precision_list, metrics_jdinac$byClass[5])
+  jdinac_recall_list <- append(jdinac_recall_list, metrics_jdinac$byClass[6])
+  
+  #### Precision recall curve 
+  pr_curve_jdinac <- pr.curve(pcor_connection_union$Weight[label_true == 1], 
+                              pcor_connection_union$Weight[label_true == 0], 
+                              curve = TRUE)
+
+  jdinac_auc_list <- append(jdinac_auc_list, pr_curve_jdinac$auc.integral)
+  toc(log = TRUE, quiet = TRUE)
+  
+  #### Remove unnecessary variables
+  rm(edge_jdinac)
+}
+
+timer <- tic.log(format = T)
+```
+
+```{r}
+boxplot(indeed_recall_list, indeed_fdr_recall_list, dnapath_recall_list, jdinac_recall_list, main = 'Recall n = 25, p = 100', names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
+
+boxplot(indeed_precision_list, indeed_fdr_precision_list, dnapath_precision_list, jdinac_precision_list, main = 'Precision n = 25, p = 100', names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
+
+boxplot(indeed_auc_list, indeed_auc_list, dnapath_auc_list, jdinac_auc_list, main = 'AUC n = 25, p = 100', names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
+
+# input time manually
+# indeed_time <- c(106.507, 108.517, 108.206, 110.8, 109.107)
+# indeed_fdr_time <- c(109.076, 109.024, 109.536, 108.802, 109.439)
+# dnapath_time <- c(1.584, 1.706, 1.652, 1.543, 1.523)
+# jdnac_time <- c(35.244, 35.084, 35.429, 34.747, 34.215)
+
+boxplot(indeed_time, indeed_fdr_time, dnapath_time, jdnac_time, main = 'Run Time n = 25, p = 100', names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'), ylab = 'Seconds')
+
+tic.clearlog()
+```
