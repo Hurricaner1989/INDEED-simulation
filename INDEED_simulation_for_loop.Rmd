@@ -10,8 +10,8 @@ library(mvtnorm)
 
 ######## Generate simulation data ########
 set.seed(42)
-n <- 25 # sample size (per network)
-p <- 100  # number of "genes" in the network.
+n <- 100 # sample size (per network)
+p <- 10  # number of "genes" in the network.
 
 #### Generate a precision matrix (pcor_matrix) for ground truth
 ## Generate random nodes
@@ -58,43 +58,55 @@ heatmap(abs(pcor_matrix - diag(p)),
         symm = TRUE, Rowv = NA, Colv = NA, revC = TRUE,
         col = colorRampPalette(RColorBrewer::brewer.pal(8, "Greys"))(50))
 
-rm(random_node, random_node_position, pcor_matrix_upper, hub_node_position, min_eigen, i, j, 
-   pcor_matrix_case, pcor_matrix_control, precision_matrix_case, precision_matrix_control)
+#### Remove unnecessary variables
+rm(random_node, random_node_position, pcor_matrix_upper, hub_node_position, min_eigen)
 ```
 
 ```{r}
+# install.packages("tictoc")
 library('tictoc')
 indeed_recall_list <- c()
 indeed_precision_list <- c()
 indeed_auc_list <- c()
+indeed_time_list <- c()
 
 indeed_fdr_recall_list <- c()
 indeed_fdr_precision_list <- c()
 indeed_fdr_auc_list <- c()
+indeed_fdr_time_list <- c()
 
 dnapath_recall_list <- c()
 dnapath_precision_list <- c()
 dnapath_auc_list <- c()
+dnapath_time_list <- c()
 
 jdinac_recall_list <- c()
 jdinac_precision_list <- c()
 jdinac_auc_list <- c()
+jdinac_time_list <- c()
 
 
-for (iter in 1:5) {
+for (iter in 1:3) {
   set.seed(iter)
+  print(paste("Iteration: ", iter))
   
-  library(INDEED)
+  # install.packages("devtools")
+  # library(devtools)
+  # devtools::install_github("ressomlab/INDEED")
+  library(INDEED) # 2.3.1 version
+  
   ######## INDEED with multiple testing correction (fdr) and not ########
   #### Run INDEED with no fdr
   id <- matrix(1:p, ncol = 1) 
   y_class <- matrix(rep(c(0, 1), each = n), nrow = 1) # case = 0, control = 1
   
+  tic.clearlog()
   tic('Indeed')
-  model_indeed_tempt <- select_rho_partial(x_df, y_class, id = id, error_curve = TRUE)
+  model_indeed_tempt <- select_rho_partial(x_df, y_class, id = id, error_curve = F)
   model_indeed_no_fdr <- partial_cor(data_list = model_indeed_tempt, rho_group1 = 'min', rho_group2 = "min",
                                      permutation = 1000, permutation_thres = 0.05, fdr = F)
   toc(log = TRUE, quiet = TRUE)
+  indeed_time_list <- append(indeed_time_list, unlist(lapply(tic.log(format=F), function(x) x$toc - x$tic)))
   
   ## Get the differential network from INDEED with no fdr
   network_indeed_no_fdr <- model_indeed_no_fdr$diff_network
@@ -106,11 +118,13 @@ for (iter in 1:5) {
   network_matrix_indeed_no_fdr <- network_matrix_indeed_no_fdr + t(network_matrix_indeed_no_fdr) # symmetric and diagonal equal to 0
   
   #### Run INDEED with fdr
+  tic.clearlog()
   tic('Indeed fdr')
-  model_indeed_tempt <- select_rho_partial(x_df, y_class, id = id, error_curve = TRUE)
+  model_indeed_tempt <- select_rho_partial(x_df, y_class, id = id, error_curve = F)
   model_indeed_fdr <- partial_cor(data_list = model_indeed_tempt, rho_group1 = 'min', rho_group2 = "min",
                                      permutation = 1000, permutation_thres = 0.05, fdr = T)
   toc(log = TRUE, quiet = TRUE)
+  indeed_fdr_time_list <- append(indeed_fdr_time_list, unlist(lapply(tic.log(format=F), function(x) x$toc - x$tic)))
   
   ## Get the differential network from INDEED with fdr
   network_indeed_fdr <- model_indeed_fdr$diff_network
@@ -145,8 +159,8 @@ for (iter in 1:5) {
   metrics_indeed_no_fdr <- confusionMatrix(factor(label_indeed_no_fdr, levels = c('1', '0')), 
                                            factor(label_true, levels = c('1', '0')))
   # metrics_indeed_no_fdr
-  indeed_precision_list <- append(indeed_precision_list, metrics_indeed_no_fdr$byClass[5])
-  indeed_recall_list <- append(indeed_recall_list, metrics_indeed_no_fdr$byClass[6])
+  indeed_precision_list <- append(indeed_precision_list, metrics_indeed_no_fdr$byClass["Precision"])
+  indeed_recall_list <- append(indeed_recall_list, metrics_indeed_no_fdr$byClass["Recall"])
   
   ## INDEED with fdr confusion matrix
   pcor_connection_union_fdr <- merge(pcor_connection, network_indeed_fdr, by = c("Node1","Node2"), all = T)
@@ -156,8 +170,8 @@ for (iter in 1:5) {
   metrics_indeed_fdr <- confusionMatrix(factor(label_indeed_fdr, levels = c('1', '0')), 
                                         factor(label_true, levels = c('1', '0')))
   # metrics_indeed_fdr
-  indeed_fdr_precision_list <- append(indeed_fdr_precision_list, metrics_indeed_fdr$byClass[5])
-  indeed_fdr_recall_list <- append(indeed_fdr_recall_list, metrics_indeed_fdr$byClass[6])
+  indeed_fdr_precision_list <- append(indeed_fdr_precision_list, metrics_indeed_fdr$byClass["Precision"])
+  indeed_fdr_recall_list <- append(indeed_fdr_recall_list, metrics_indeed_fdr$byClass["Recall"])
   
   #### Precision recall curve
   # install.packages("PRROC")
@@ -166,7 +180,7 @@ for (iter in 1:5) {
   ## Get pr curve for INDEED with no fdr
   pr_curve_indeed_no_fdr <- pr.curve(abs(pcor_connection_union_no_fdr$Weight[label_true == 1]), 
                                      abs(pcor_connection_union_no_fdr$Weight[label_true == 0]), 
-                                     curve = TRUE)
+                                     curve = F)
 
   indeed_auc_list <- append(indeed_auc_list, pr_curve_indeed_no_fdr$auc.integral)
   
@@ -174,7 +188,7 @@ for (iter in 1:5) {
   ## Get pr curve for INDEED with fdr
   pr_curve_indeed_fdr <- pr.curve(abs(pcor_connection_union_fdr$Weight[label_true == 1]),
                                   abs(pcor_connection_union_fdr$Weight[label_true == 0]), 
-                                  curve = TRUE)
+                                  curve = F)
   
   indeed_fdr_auc_list <- append(indeed_fdr_auc_list, pr_curve_indeed_fdr$auc.integral)
   
@@ -183,14 +197,20 @@ for (iter in 1:5) {
   rm(model_indeed_tempt, i, j)
   
   
+  # install.packages("dnapath")
   library(dnapath) # 0.6.11 version
-  tic('DNAPATH')
+  
   ######## DNAPATH ########
   #### Run DNAPATH
   x_df_dnapath <- t(x_df)
   colnames(x_df_dnapath) <- id
   rownames(x_df_dnapath) <- 1:nrow(x_df_dnapath)
+  
+  tic.clearlog()
+  tic('DNAPATH')
   model_dnapath <- dnapath(x = x_df_dnapath, groups = t(y_class), pathway_list = NULL)
+  toc(log = TRUE, quiet = TRUE)
+  dnapath_time_list <- append(dnapath_time_list, unlist(lapply(tic.log(format=F), function(x) x$toc - x$tic)))
   edge_dnapath <- data.frame(summarize_edges(model_dnapath[[1]]))
   
   ## Get the differential network from DNAPATH
@@ -222,16 +242,16 @@ for (iter in 1:5) {
   metrics_dnapath <- confusionMatrix(factor(label_dnapath, levels = c('1', '0')), 
                                      factor(label_true, levels = c('1', '0')))
   # metrics_dnapath
-  dnapath_precision_list <- append(dnapath_precision_list, metrics_dnapath$byClass[5])
-  dnapath_recall_list <- append(dnapath_recall_list, metrics_dnapath$byClass[6])
+  dnapath_precision_list <- append(dnapath_precision_list, metrics_dnapath$byClass["Precision"])
+  dnapath_recall_list <- append(dnapath_recall_list, metrics_dnapath$byClass["Recall"])
   
   #### Precision recall curve 
   pr_curve_dnapath <- pr.curve(pcor_connection_union$DC_Score[label_true == 1], 
                                pcor_connection_union$DC_Score[label_true == 0], 
-                               curve = TRUE)
+                               curve = F)
   
-  dnapath_auc_list <- append(dnapath_auc_list, pr_curve_dnapath$auc.davis.goadrich)
-  toc(log = TRUE, quiet = TRUE)
+  dnapath_auc_list <- append(dnapath_auc_list, pr_curve_dnapath$auc.integral)
+  
   #### Remove unnecessary variables
   rm(x_df_dnapath, edge_dnapath, i, j, k)
   
@@ -239,13 +259,18 @@ for (iter in 1:5) {
   ######## JDINAC ########
   #### Load JDINAC
   source("jdinac.R") # from github page
-  tic('JDNAC')
+  
   #### Run JDINAC
   edge_jdinac <- matrix(1, nrow = p, ncol = p)
   edge_jdinac[lower.tri(edge_jdinac, diag = T)] <- 0
   edge_jdinac <- which(edge_jdinac != 0, arr.ind = T)
+  
+  tic.clearlog()
+  tic('JDNAC')
   model_jdinac <- jdinac(EDGE = edge_jdinac, classLabel = t(y_class), DataFit = t(x_df), DataPre = t(x_df),
                          nsplit = 5, nfolds = 5)
+  toc(log = TRUE, quiet = TRUE)
+  jdinac_time_list <- append(jdinac_time_list, unlist(lapply(tic.log(format=F), function(x) x$toc - x$tic)))
   network_jdinac <- model_jdinac$Eset
   network_jdinac <- data.frame(network_jdinac)
   names(network_jdinac) <- c("Node1", "Node2", "Weight")
@@ -266,38 +291,29 @@ for (iter in 1:5) {
   metrics_jdinac <- confusionMatrix(factor(label_jdinac, levels = c('1', '0')), 
                                     factor(label_true, levels = c('1', '0')))
   # metrics_jdinac 
-  jdinac_precision_list <- append(jdinac_precision_list, metrics_jdinac$byClass[5])
-  jdinac_recall_list <- append(jdinac_recall_list, metrics_jdinac$byClass[6])
+  jdinac_precision_list <- append(jdinac_precision_list, metrics_jdinac$byClass["Precision"])
+  jdinac_recall_list <- append(jdinac_recall_list, metrics_jdinac$byClass["Recall"])
   
   #### Precision recall curve 
   pr_curve_jdinac <- pr.curve(pcor_connection_union$Weight[label_true == 1], 
                               pcor_connection_union$Weight[label_true == 0], 
-                              curve = TRUE)
+                              curve = F)
 
   jdinac_auc_list <- append(jdinac_auc_list, pr_curve_jdinac$auc.integral)
-  toc(log = TRUE, quiet = TRUE)
   
   #### Remove unnecessary variables
   rm(edge_jdinac)
 }
-
-timer <- tic.log(format = T)
 ```
 
 ```{r}
-boxplot(indeed_recall_list, indeed_fdr_recall_list, dnapath_recall_list, jdinac_recall_list, main = 'Recall n = 25, p = 100', names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
+boxplot(indeed_recall_list, indeed_fdr_recall_list, dnapath_recall_list, jdinac_recall_list, main = paste("Recall n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
 
-boxplot(indeed_precision_list, indeed_fdr_precision_list, dnapath_precision_list, jdinac_precision_list, main = 'Precision n = 25, p = 100', names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
+boxplot(indeed_precision_list, indeed_fdr_precision_list, dnapath_precision_list, jdinac_precision_list, main = paste("Precision n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
 
-boxplot(indeed_auc_list, indeed_auc_list, dnapath_auc_list, jdinac_auc_list, main = 'AUC n = 25, p = 100', names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
+boxplot(indeed_auc_list, indeed_auc_list, dnapath_auc_list, jdinac_auc_list, main = paste("AUC n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
 
-# input time manually
-# indeed_time <- c(106.507, 108.517, 108.206, 110.8, 109.107)
-# indeed_fdr_time <- c(109.076, 109.024, 109.536, 108.802, 109.439)
-# dnapath_time <- c(1.584, 1.706, 1.652, 1.543, 1.523)
-# jdnac_time <- c(35.244, 35.084, 35.429, 34.747, 34.215)
-
-boxplot(indeed_time, indeed_fdr_time, dnapath_time, jdnac_time, main = 'Run Time n = 25, p = 100', names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'), ylab = 'Seconds')
+boxplot(indeed_time_list, indeed_fdr_time_list, dnapath_time_list, jdinac_time_list, main = paste("Run Time n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'), ylab = 'Seconds')
 
 tic.clearlog()
 ```
