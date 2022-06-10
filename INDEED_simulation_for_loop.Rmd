@@ -85,7 +85,6 @@ jdinac_precision_list <- c()
 jdinac_auc_list <- c()
 jdinac_time_list <- c()
 
-
 for (iter in 1:3) {
   set.seed(iter)
   print(paste("Iteration: ", iter))
@@ -184,7 +183,6 @@ for (iter in 1:3) {
 
   indeed_auc_list <- append(indeed_auc_list, pr_curve_indeed_no_fdr$auc.integral)
   
-  
   ## Get pr curve for INDEED with fdr
   pr_curve_indeed_fdr <- pr.curve(abs(pcor_connection_union_fdr$Weight[label_true == 1]),
                                   abs(pcor_connection_union_fdr$Weight[label_true == 0]), 
@@ -192,10 +190,8 @@ for (iter in 1:3) {
   
   indeed_fdr_auc_list <- append(indeed_fdr_auc_list, pr_curve_indeed_fdr$auc.integral)
   
-  
   #### Remove unnecessary variables
   rm(model_indeed_tempt, i, j)
-  
   
   # install.packages("dnapath")
   library(dnapath) # 0.6.11 version
@@ -255,7 +251,6 @@ for (iter in 1:3) {
   #### Remove unnecessary variables
   rm(x_df_dnapath, edge_dnapath, i, j, k)
   
-  
   ######## JDINAC ########
   #### Load JDINAC
   source("jdinac.R") # from github page
@@ -307,13 +302,11 @@ for (iter in 1:3) {
 ```
 
 ```{r}
-boxplot(indeed_recall_list, indeed_fdr_recall_list, dnapath_recall_list, jdinac_recall_list, main = paste("Recall n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
+boxplot(indeed_recall_list, indeed_fdr_recall_list, dnapath_recall_list, jdinac_recall_list, main = paste("Recall n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDINAC'))
 
-boxplot(indeed_precision_list, indeed_fdr_precision_list, dnapath_precision_list, jdinac_precision_list, main = paste("Precision n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
+boxplot(indeed_precision_list, indeed_fdr_precision_list, dnapath_precision_list, jdinac_precision_list, main = paste("Precision n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDINAC'))
 
-boxplot(indeed_auc_list, indeed_auc_list, dnapath_auc_list, jdinac_auc_list, main = paste("AUC n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'))
+boxplot(indeed_auc_list, indeed_auc_list, dnapath_auc_list, jdinac_auc_list, main = paste("AUC n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDINAC'))
 
-boxplot(indeed_time_list, indeed_fdr_time_list, dnapath_time_list, jdinac_time_list, main = paste("Run Time n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDNAC'), ylab = 'Seconds')
-
-tic.clearlog()
+boxplot(indeed_time_list, indeed_fdr_time_list, dnapath_time_list, jdinac_time_list, main = paste("Run Time n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDINAC'), ylab = 'Seconds')
 ```
