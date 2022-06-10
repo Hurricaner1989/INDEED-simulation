@@ -261,7 +261,7 @@ for (iter in 1:3) {
   edge_jdinac <- which(edge_jdinac != 0, arr.ind = T)
   
   tic.clearlog()
-  tic('JDNAC')
+  tic('JDINAC')
   model_jdinac <- jdinac(EDGE = edge_jdinac, classLabel = t(y_class), DataFit = t(x_df), DataPre = t(x_df),
                          nsplit = 5, nfolds = 5)
   toc(log = TRUE, quiet = TRUE)
