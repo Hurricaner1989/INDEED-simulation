@@ -306,7 +306,7 @@ boxplot(indeed_recall_list, indeed_fdr_recall_list, dnapath_recall_list, jdinac_
 
 boxplot(indeed_precision_list, indeed_fdr_precision_list, dnapath_precision_list, jdinac_precision_list, main = paste("Precision n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDINAC'))
 
-boxplot(indeed_auc_list, indeed_auc_list, dnapath_auc_list, jdinac_auc_list, main = paste("AUC n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDINAC'))
+boxplot(indeed_auc_list, indeed_fdr_auc_list, dnapath_auc_list, jdinac_auc_list, main = paste("AUC n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDINAC'))
 
 boxplot(indeed_time_list, indeed_fdr_time_list, dnapath_time_list, jdinac_time_list, main = paste("Run Time n =", n, ", p =", p), names = c('Indeed', 'Indeed_FDR', 'DNAPATH', 'JDINAC'), ylab = 'Seconds')
 ```
